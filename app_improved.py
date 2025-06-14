@@ -434,100 +434,122 @@ if 'df_mae' in st.session_state:
         except Exception as e:
             st.error(f"Erro ao processar vendas: {str(e)}")
 
-# CONTROLE DE ESTOQUE - REINTEGRADO
+# CONTROLE DE ESTOQUE - CORRIGIDO
 if 'df_mae' in st.session_state:
     st.header("📦 Controle de Estoque")
     st.subheader("Adicionar/Atualizar Estoque Manualmente")
 
-    # BUSCA MELHORADA COM MULTISELECT
-    st.write("**Digite para buscar itens:**")
+    # BUSCA MELHORADA - SEPARANDO TIPOS
+    st.write("**Selecione o tipo de entrada:**")
     
-    # Criar lista de opções para busca
-    all_options = []
-    df_mae = st.session_state['df_mae']
-    if not df_mae.empty:
-        # Combinar código + descrição para facilitar busca
-        for _, row in df_mae.iterrows():
-            codigo = str(row.get('codigo', ''))
-            semi = str(row.get('semi', ''))
-            gola = str(row.get('gola', ''))
-            bordado = str(row.get('bordado', ''))
-            
-            # Adicionar opções formatadas
-            if codigo and codigo != 'nan':
-                all_options.append(f"{codigo}")
-            if semi and semi != 'nan':
-                all_options.append(f"{semi}")
-            if gola and gola != 'nan':
-                all_options.append(f"{gola}")
-            if bordado and bordado != 'nan':
-                all_options.append(f"{bordado}")
-    
-    # Remover duplicatas e ordenar
-    all_options = sorted(list(set(all_options)))
-    
-    # Campo de busca com multiselect (permite busca)
-    selected_items = st.multiselect(
-        "Busque e selecione o item:",
-        options=all_options,
-        max_selections=1,
-        help="Digite para filtrar os itens"
+    tipo_entrada = st.radio(
+        "Tipo de entrada:",
+        ["Semi (entrada geral)", "Produto específico (código)"],
+        help="Semi = entrada de estoque geral | Produto = entrada de item específico com gola e bordado"
     )
     
-    # Item selecionado
-    selected_item = selected_items[0] if selected_items else ""
+    df_mae = st.session_state['df_mae']
     
-    if selected_item:
-        st.success(f"Item selecionado: {selected_item}")
-    quantidade_adicionar = st.number_input("Quantidade a Adicionar/Remover", value=0, step=1)
-
-    if st.button("Adicionar/Atualizar Estoque"):
-        item_to_process = selected_item
+    if tipo_entrada == "Semi (entrada geral)":
+        # Lista apenas os semis únicos
+        semis_unicos = sorted(df_mae['semi'].dropna().unique().tolist())
         
-        if item_to_process:
-            estoque_df = carregar_estoque()
+        selected_semi = st.selectbox(
+            "Selecione o Semi:",
+            options=[""] + semis_unicos,
+            help="Entrada de estoque geral para o semi (sem gola/bordado específicos)"
+        )
+        
+        if selected_semi:
+            st.success(f"Semi selecionado: {selected_semi}")
             
-            # Find the item in df_mae to get its semi, gola, bordado for new stock entries
-            matched_item_info = df_mae[(df_mae['codigo'] == item_to_process) |
-                                       (df_mae['semi'] == item_to_process) |
-                                       (df_mae['gola'] == item_to_process) |
-                                       (df_mae['bordado'] == item_to_process)]
-            
-            item_semi = ''
-            item_gola = ''
-            item_bordado = ''
+        quantidade_adicionar = st.number_input("Quantidade a Adicionar/Remover", value=0, step=1)
 
-            if not matched_item_info.empty:
-                # Take the first match
-                item_semi = matched_item_info['semi'].iloc[0] if 'semi' in matched_item_info.columns else ''
-                item_gola = matched_item_info['gola'].iloc[0] if 'gola' in matched_item_info.columns else ''
-                item_bordado = matched_item_info['bordado'].iloc[0] if 'bordado' in matched_item_info.columns else ''
+        if st.button("Adicionar/Atualizar Estoque"):
+            if selected_semi:
+                estoque_df = carregar_estoque()
+                
+                # Para entrada de semi, usar campos genéricos
+                item_semi = selected_semi
+                item_gola = "GERAL"  # Marcador para entrada geral
+                item_bordado = "GERAL"  # Marcador para entrada geral
+                
+                # Verificar se já existe no estoque
+                existing_idx = estoque_df[
+                    (estoque_df['semi'] == item_semi) & 
+                    (estoque_df['gola'] == item_gola) & 
+                    (estoque_df['bordado'] == item_bordado)
+                ].index
+
+                if not existing_idx.empty:
+                    estoque_df.loc[existing_idx, 'quantidade'] += quantidade_adicionar
+                else:
+                    novo_item_estoque = pd.DataFrame([{
+                        'codigo': f"SEMI_{selected_semi}", 
+                        'semi': item_semi, 
+                        'gola': item_gola, 
+                        'bordado': item_bordado, 
+                        'quantidade': quantidade_adicionar
+                    }])
+                    estoque_df = pd.concat([estoque_df, novo_item_estoque], ignore_index=True)
+                
+                salvar_estoque(estoque_df)
+                st.success(f"Estoque do semi '{selected_semi}' atualizado!")
             else:
-                st.warning(f"Item '{item_to_process}' não encontrado na Planilha Mãe. Adicionando ao estoque sem detalhes de semi/gola/bordado.")
-
-            # Verificar se já existe no estoque
-            existing_idx = estoque_df[
-                (estoque_df['semi'] == item_semi) & 
-                (estoque_df['gola'] == item_gola) & 
-                (estoque_df['bordado'] == item_bordado)
-            ].index
-
-            if not existing_idx.empty:
-                estoque_df.loc[existing_idx, 'quantidade'] += quantidade_adicionar
-            else:
-                novo_item_estoque = pd.DataFrame([{
-                    'codigo': item_to_process, 
-                    'semi': item_semi, 
-                    'gola': item_gola, 
-                    'bordado': item_bordado, 
-                    'quantidade': quantidade_adicionar
-                }])
-                estoque_df = pd.concat([estoque_df, novo_item_estoque], ignore_index=True)
+                st.warning("Por favor, selecione um semi.")
+    
+    else:  # Produto específico
+        # Lista todos os códigos
+        codigos_unicos = sorted(df_mae['codigo'].dropna().unique().tolist())
+        
+        selected_codigo = st.selectbox(
+            "Selecione o Código do Produto:",
+            options=[""] + codigos_unicos,
+            help="Entrada de estoque para produto específico (com gola e bordado)"
+        )
+        
+        if selected_codigo:
+            # Mostrar detalhes do produto
+            produto_info = df_mae[df_mae['codigo'] == selected_codigo].iloc[0]
+            st.info(f"**Semi:** {produto_info.get('semi', 'N/A')}")
+            st.info(f"**Gola:** {produto_info.get('gola', 'N/A')}")
+            st.info(f"**Bordado:** {produto_info.get('bordado', 'N/A')}")
             
-            salvar_estoque(estoque_df)
-            st.success(f"Estoque de '{item_to_process}' atualizado!")
-        else:
-            st.warning("Por favor, selecione ou digite um item.")
+        quantidade_adicionar = st.number_input("Quantidade a Adicionar/Remover", value=0, step=1, key="produto_qtd")
+
+        if st.button("Adicionar/Atualizar Estoque", key="produto_btn"):
+            if selected_codigo:
+                estoque_df = carregar_estoque()
+                
+                # Pegar informações do produto
+                produto_info = df_mae[df_mae['codigo'] == selected_codigo].iloc[0]
+                item_semi = produto_info.get('semi', '')
+                item_gola = produto_info.get('gola', '')
+                item_bordado = produto_info.get('bordado', '')
+                
+                # Verificar se já existe no estoque
+                existing_idx = estoque_df[
+                    (estoque_df['semi'] == item_semi) & 
+                    (estoque_df['gola'] == item_gola) & 
+                    (estoque_df['bordado'] == item_bordado)
+                ].index
+
+                if not existing_idx.empty:
+                    estoque_df.loc[existing_idx, 'quantidade'] += quantidade_adicionar
+                else:
+                    novo_item_estoque = pd.DataFrame([{
+                        'codigo': selected_codigo, 
+                        'semi': item_semi, 
+                        'gola': item_gola, 
+                        'bordado': item_bordado, 
+                        'quantidade': quantidade_adicionar
+                    }])
+                    estoque_df = pd.concat([estoque_df, novo_item_estoque], ignore_index=True)
+                
+                salvar_estoque(estoque_df)
+                st.success(f"Estoque do produto '{selected_codigo}' atualizado!")
+            else:
+                st.warning("Por favor, selecione um código.")
 
     st.subheader("Estoque Atual - Resumo")
     estoque_df = carregar_estoque()

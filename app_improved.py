@@ -37,7 +37,8 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
     # Estilos
     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True)
-    semi_fill = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")
+    semi_fill_masculino = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")  # Azul claro
+    semi_fill_feminino = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")   # Rosa bebê
     semi_font = Font(bold=True)
     border = Border(
         left=Side(style='thin'),
@@ -63,6 +64,12 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
             if row['semi'] != current_semi:
                 # Nova linha de semi
                 current_semi = row['semi']
+                
+                # Determinar cor baseada no tipo (Feminino = rosa, outros = azul)
+                if 'Feminino' in str(current_semi) or 'Menina' in str(current_semi):
+                    semi_fill = semi_fill_feminino
+                else:
+                    semi_fill = semi_fill_masculino
                 
                 # Linha do semi
                 for col_num, value in enumerate(row, 1):

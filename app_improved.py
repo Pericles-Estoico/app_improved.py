@@ -15,6 +15,11 @@ st.markdown("""
     width: 100%;
     margin: 0 auto;
 }
+@media (max-width: 768px) {
+    .centered-title {
+        text-align: center;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -27,7 +32,51 @@ st.markdown('</div>', unsafe_allow_html=True)
 def load_excel(arquivo):
     return pd.read_excel(arquivo)
 
-# Função para gerar Excel formatado (VERSÃO ORIGINAL CORRIGIDA)
+# Função para determinar categoria e ordem
+def get_categoria_ordem(semi):
+    semi_str = str(semi).lower()
+    
+    # Determinar categoria principal
+    if 'manga longa' in semi_str:
+        categoria = 1  # Azul - primeiro
+    elif 'manga curta menina' in semi_str:
+        categoria = 2  # Rosa - segundo
+    elif 'manga curta menino' in semi_str:
+        categoria = 3  # Marinho - terceiro
+    elif 'mijão' in semi_str or 'mijao' in semi_str:
+        categoria = 4  # Amarelo - quarto
+    else:
+        categoria = 5  # Outros
+    
+    # Determinar cor (branco primeiro)
+    if 'branco' in semi_str:
+        cor_ordem = 1
+    elif 'vermelho' in semi_str:
+        cor_ordem = 2
+    elif 'marinho' in semi_str:
+        cor_ordem = 3
+    elif 'azul' in semi_str:
+        cor_ordem = 4
+    elif 'rosa' in semi_str:
+        cor_ordem = 5
+    else:
+        cor_ordem = 6
+    
+    # Determinar tamanho (RN, P, M, G)
+    if '-rn' in semi_str:
+        tamanho_ordem = 1
+    elif '-p' in semi_str:
+        tamanho_ordem = 2
+    elif '-m' in semi_str:
+        tamanho_ordem = 3
+    elif '-g' in semi_str:
+        tamanho_ordem = 4
+    else:
+        tamanho_ordem = 5
+    
+    return categoria, cor_ordem, tamanho_ordem
+
+# Função para gerar Excel formatado com ordenação correta
 def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
     output = BytesIO()
     wb = Workbook()
@@ -37,8 +86,13 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
     # Estilos
     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True)
-    semi_fill_masculino = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")  # Azul claro
-    semi_fill_feminino = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")   # Rosa bebê
+    
+    # Cores específicas por tipo de produto
+    manga_longa_fill = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")  # Azul claro
+    manga_curta_menina_fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")  # Rosa claro
+    manga_curta_menino_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Azul escuro
+    mijao_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # Amarelo
+    
     semi_font = Font(bold=True)
     border = Border(
         left=Side(style='thin'),
@@ -56,37 +110,93 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
         cell.border = border
     
     if agrupar_por_semi:
-        # LÓGICA ORIGINAL - Agrupar por semi mas mostrar todos os dados
-        row_num = 2
+        # Agrupar dados
+        relatorio_componentes = df.groupby(['semi', 'gola', 'bordado'])['quantidade'].sum().reset_index()
+        
+        # Adicionar colunas de ordenação
+        relatorio_componentes[['categoria', 'cor_ordem', 'tamanho_ordem']] = relatorio_componentes['semi'].apply(
+            lambda x: pd.Series(get_categoria_ordem(x))
+        )
+        
+        # Ordenar conforme especificado
+        relatorio_componentes = relatorio_componentes.sort_values([
+            'categoria',      # 1=Manga Longa, 2=MC Menina, 3=MC Menino, 4=Mijão
+            'cor_ordem',      # 1=Branco primeiro
+            'tamanho_ordem',  # 1=RN, 2=P, 3=M, 4=G
+            'semi',
+            'gola',
+            'bordado'
+        ])
+        
+        # Criar estrutura hierárquica ordenada
+        relatorio_hierarquico = []
         current_semi = None
         
-        for _, row in df.iterrows():
-            # Verificar se mudou o semi
+        for _, row in relatorio_componentes.iterrows():
             if row['semi'] != current_semi:
+                # Adicionar linha do semi
                 current_semi = row['semi']
-                
-                # Determinar cor baseada no tipo
-                if 'Feminino' in str(current_semi) or 'Menina' in str(current_semi):
-                    semi_fill = semi_fill_feminino
+                total_semi = relatorio_componentes[relatorio_componentes['semi'] == current_semi]['quantidade'].sum()
+                relatorio_hierarquico.append({
+                    'Item': current_semi,
+                    'Quantidade': total_semi,
+                    'Check': '',
+                    'categoria': row['categoria']
+                })
+            
+            # Adicionar linha do componente
+            componente = f"{row['gola']} {row['bordado']}".strip()
+            relatorio_hierarquico.append({
+                'Item': f"  {componente}",
+                'Quantidade': row['quantidade'],
+                'Check': '',
+                'categoria': row['categoria']
+            })
+        
+        # Escrever dados no Excel
+        row_num = 2
+        for item in relatorio_hierarquico:
+            item_name = item['Item']
+            quantidade = item['Quantidade']
+            check = item['Check']
+            categoria = item['categoria']
+            
+            # Determinar cor de fundo
+            if not item_name.startswith('  '):  # É um semi
+                if categoria == 1:  # Manga Longa
+                    semi_fill = manga_longa_fill
+                elif categoria == 2:  # MC Menina
+                    semi_fill = manga_curta_menina_fill
+                elif categoria == 3:  # MC Menino
+                    semi_fill = manga_curta_menino_fill
+                elif categoria == 4:  # Mijão
+                    semi_fill = mijao_fill
                 else:
-                    semi_fill = semi_fill_masculino
+                    semi_fill = manga_longa_fill
                 
                 # Linha do semi com formatação
-                for col_num, value in enumerate(row, 1):
-                    cell = ws.cell(row=row_num, column=col_num, value=value)
-                    if col_num == 1:  # Coluna semi
-                        cell.fill = semi_fill
-                        cell.font = semi_font
-                    cell.border = border
-                row_num += 1
+                cell1 = ws.cell(row=row_num, column=1, value=item_name)
+                cell1.fill = semi_fill
+                cell1.font = semi_font
+                cell1.border = border
+                
+                cell2 = ws.cell(row=row_num, column=2, value=quantidade)
+                cell2.border = border
+                
+                cell3 = ws.cell(row=row_num, column=3, value=check)
+                cell3.border = border
             else:
-                # Linha de componente (sem repetir o nome do semi)
-                for col_num, value in enumerate(row, 1):
-                    cell = ws.cell(row=row_num, column=col_num, value=value)
-                    if col_num == 1:  # Deixar semi vazio
-                        cell.value = ""
-                    cell.border = border
-                row_num += 1
+                # Linha de componente
+                cell1 = ws.cell(row=row_num, column=1, value=item_name)
+                cell1.border = border
+                
+                cell2 = ws.cell(row=row_num, column=2, value=quantidade)
+                cell2.border = border
+                
+                cell3 = ws.cell(row=row_num, column=3, value=check)
+                cell3.border = border
+            
+            row_num += 1
     else:
         # Formato simples
         for row_num, (_, row) in enumerate(df.iterrows(), 2):
@@ -204,10 +314,9 @@ if 'df_mae' in st.session_state:
                     col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
-                        # Relatório de Componentes
-                        relatorio_componentes = dados_validos.groupby(['semi', 'gola', 'bordado'])['quantidade'].sum().reset_index()
-                        relatorio_componentes = relatorio_componentes.sort_values(['semi', 'gola', 'bordado'])
-                        excel_componentes = gerar_excel_formatado(relatorio_componentes, "relatorio_componentes", agrupar_por_semi=True)
+                        # Relatório de Componentes com ordenação correta
+                        excel_componentes = gerar_excel_formatado(dados_validos, "relatorio_componentes", agrupar_por_semi=True)
+                        
                         st.download_button(
                             label="📥 Relatório Componentes",
                             data=excel_componentes,

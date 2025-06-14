@@ -276,15 +276,57 @@ if 'df_mae' in st.session_state:
                 if len(codigos_faltantes) > 0:
                     st.warning(f"⚠️ {len(codigos_faltantes)} códigos faltantes")
                     
-                    # Download códigos faltantes
-                    df_faltantes = pd.DataFrame({'codigo': codigos_faltantes})
-                    excel_faltantes = gerar_excel_formatado(df_faltantes, "codigos_faltantes")
-                    st.download_button(
-                        label="📥 Baixar Códigos Faltantes",
-                        data=excel_faltantes,
-                        file_name="codigos_faltantes.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Download códigos faltantes
+                        df_faltantes = pd.DataFrame({'codigo': codigos_faltantes})
+                        excel_faltantes = gerar_excel_formatado(df_faltantes, "codigos_faltantes")
+                        st.download_button(
+                            label="📥 Baixar Códigos Faltantes",
+                            data=excel_faltantes,
+                            file_name="codigos_faltantes.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    
+                    with col2:
+                        # Upload códigos faltantes completados
+                        uploaded_faltantes = st.file_uploader(
+                            "📤 Enviar Códigos Completados", 
+                            type=["xlsx"], 
+                            key="codigos_completados",
+                            help="Envie a planilha de códigos faltantes preenchida com semi, gola e bordado"
+                        )
+                        
+                        if uploaded_faltantes:
+                            try:
+                                df_novos = load_excel(uploaded_faltantes)
+                                df_novos.columns = df_novos.columns.str.strip().str.replace(" ", "_").str.lower()
+                                
+                                # Verificar se tem as colunas necessárias
+                                if all(col in df_novos.columns for col in ['codigo', 'semi', 'gola', 'bordado']):
+                                    # Adicionar novos produtos à planilha mãe
+                                    df_mae_atualizada = pd.concat([st.session_state['df_mae'], df_novos], ignore_index=True)
+                                    df_mae_atualizada = df_mae_atualizada.drop_duplicates(subset=['codigo'], keep='last')
+                                    
+                                    # Atualizar na sessão
+                                    st.session_state['df_mae'] = df_mae_atualizada
+                                    
+                                    st.success(f"✅ {len(df_novos)} produtos adicionados à planilha mãe!")
+                                    st.info("🔄 Reprocesse a planilha de vendas para ver os novos produtos")
+                                    
+                                    # Botão para baixar planilha mãe atualizada
+                                    excel_mae_atualizada = gerar_excel_formatado(df_mae_atualizada, "planilha_mae_atualizada")
+                                    st.download_button(
+                                        label="📥 Baixar Planilha Mãe Atualizada",
+                                        data=excel_mae_atualizada,
+                                        file_name="planilha_mae_atualizada.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                                else:
+                                    st.error("❌ Planilha deve ter colunas: codigo, semi, gola, bordado")
+                            except Exception as e:
+                                st.error(f"Erro ao processar códigos completados: {str(e)}")
                 
                 if not dados_validos.empty:
                     st.success(f"✅ Gerando relatórios com {len(dados_validos)} itens")
@@ -375,41 +417,6 @@ if 'df_mae' in st.session_state:
                 
         except Exception as e:
             st.error(f"Erro ao processar vendas: {str(e)}")
-
-# Controle de Estoque
-st.header("📦 Controle de Estoque")
-
-if 'df_mae' in st.session_state:
-    df_mae = st.session_state['df_mae']
-    
-    if 'codigo' in df_mae.columns:
-        produtos_lista = df_mae['codigo'].tolist()
-        
-        # Busca de produto
-        selected_items = st.multiselect(
-            "Busque e selecione o item:",
-            options=produtos_lista,
-            max_selections=1,
-            placeholder="Digite para buscar..."
-        )
-        
-        if selected_items:
-            selected_item = selected_items[0]
-            
-            # Mostrar informações do produto
-            produto_info = df_mae[df_mae['codigo'] == selected_item].iloc[0]
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.info(f"**Código:** {selected_item}")
-                st.info(f"**Semi:** {produto_info.get('semi', 'N/A')}")
-            with col2:
-                st.info(f"**Gola:** {produto_info.get('gola', 'N/A')}")
-                st.info(f"**Bordado:** {produto_info.get('bordado', 'N/A')}")
-    else:
-        st.warning("Planilha mãe deve ter coluna 'codigo'")
-else:
-    st.info("Carregue a Planilha Mãe primeiro para usar o controle de estoque")
 
 st.markdown("---")
 st.markdown("**Pure & Posh Baby** - Sistema de Relatórios v1.0")

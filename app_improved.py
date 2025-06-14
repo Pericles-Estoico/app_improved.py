@@ -27,7 +27,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 def load_excel(arquivo):
     return pd.read_excel(arquivo)
 
-# Função para gerar Excel formatado
+# Função para gerar Excel formatado (VERSÃO ORIGINAL CORRIGIDA)
 def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
     output = BytesIO()
     wb = Workbook()
@@ -56,22 +56,22 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
         cell.border = border
     
     if agrupar_por_semi:
-        # Agrupar por semi e aplicar formatação
+        # LÓGICA ORIGINAL - Agrupar por semi mas mostrar todos os dados
         row_num = 2
         current_semi = None
         
         for _, row in df.iterrows():
+            # Verificar se mudou o semi
             if row['semi'] != current_semi:
-                # Nova linha de semi
                 current_semi = row['semi']
                 
-                # Determinar cor baseada no tipo (Feminino = rosa, outros = azul)
+                # Determinar cor baseada no tipo
                 if 'Feminino' in str(current_semi) or 'Menina' in str(current_semi):
                     semi_fill = semi_fill_feminino
                 else:
                     semi_fill = semi_fill_masculino
                 
-                # Linha do semi
+                # Linha do semi com formatação
                 for col_num, value in enumerate(row, 1):
                     cell = ws.cell(row=row_num, column=col_num, value=value)
                     if col_num == 1:  # Coluna semi
@@ -80,10 +80,10 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
                     cell.border = border
                 row_num += 1
             else:
-                # Linha de componente
+                # Linha de componente (sem repetir o nome do semi)
                 for col_num, value in enumerate(row, 1):
                     cell = ws.cell(row=row_num, column=col_num, value=value)
-                    if col_num == 1:  # Deixar semi vazio para componentes
+                    if col_num == 1:  # Deixar semi vazio
                         cell.value = ""
                     cell.border = border
                 row_num += 1

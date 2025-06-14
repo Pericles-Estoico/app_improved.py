@@ -95,7 +95,7 @@ if 'df_mae' in st.session_state:
                     
                     with col1:
                         st.subheader("👔 Manga Longa")
-                        ml_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Longa', na=False)]
+                        ml_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Longa|ML|manga longa', na=False, case=False)]
                         if not ml_resumo.empty:
                             total_ml = ml_resumo['quantidade'].sum()
                             st.metric("Total ML", total_ml)
@@ -104,7 +104,7 @@ if 'df_mae' in st.session_state:
                     
                     with col2:
                         st.subheader("👗 Manga Curta")
-                        mc_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Curta', na=False)]
+                        mc_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Curta|MC|manga curta', na=False, case=False)]
                         if not mc_resumo.empty:
                             total_mc = mc_resumo['quantidade'].sum()
                             st.metric("Total MC", total_mc)
@@ -113,7 +113,7 @@ if 'df_mae' in st.session_state:
                     
                     with col3:
                         st.subheader("👶 Mijões")
-                        mij_resumo = dados_validos[dados_validos['semi'].str.contains('Mijão|Mijao', na=False)]
+                        mij_resumo = dados_validos[dados_validos['semi'].str.contains('Mijão|Mijao|mijão|mijao', na=False, case=False)]
                         if not mij_resumo.empty:
                             total_mij = mij_resumo['quantidade'].sum()
                             st.metric("Total Mijões", total_mij)

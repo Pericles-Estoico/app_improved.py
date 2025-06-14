@@ -101,15 +101,15 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
         bottom=Side(style='thin')
     )
     
-    # Cabeçalhos
-    headers = list(df.columns)
-    for col_num, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_num, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.border = border
-    
     if agrupar_por_semi:
+        # Cabeçalhos fixos para relatório de componentes
+        headers = ['Item', 'Quantidade', 'Check']
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = border
+        
         # Agrupar dados
         relatorio_componentes = df.groupby(['semi', 'gola', 'bordado'])['quantidade'].sum().reset_index()
         
@@ -153,7 +153,7 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
                 'categoria': row['categoria']
             })
         
-        # Escrever dados no Excel
+        # Escrever dados no Excel - APENAS 3 COLUNAS
         row_num = 2
         for item in relatorio_hierarquico:
             item_name = item['Item']
@@ -197,25 +197,38 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
                 cell3.border = border
             
             row_num += 1
+        
+        # Ajustar largura das colunas
+        ws.column_dimensions['A'].width = 60
+        ws.column_dimensions['B'].width = 12
+        ws.column_dimensions['C'].width = 8
+        
     else:
-        # Formato simples
+        # Formato simples - usar colunas do dataframe
+        headers = list(df.columns)
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = border
+        
         for row_num, (_, row) in enumerate(df.iterrows(), 2):
             for col_num, value in enumerate(row, 1):
                 cell = ws.cell(row=row_num, column=col_num, value=value)
                 cell.border = border
-    
-    # Ajustar largura das colunas
-    for column in ws.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Ajustar largura das colunas
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
     
     wb.save(output)
     output.seek(0)

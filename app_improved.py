@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
 
 # Configurações
 st.set_page_config(page_title="Pure & Posh Baby - Sistema de Relatórios", page_icon="👑", layout="wide")
@@ -23,6 +24,14 @@ st.markdown('</div>', unsafe_allow_html=True)
 # Função para carregar Excel
 def load_excel(arquivo):
     return pd.read_excel(arquivo)
+
+# Função para gerar Excel para download
+def gerar_excel_download(df, nome_arquivo):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Relatório')
+    output.seek(0)
+    return output
 
 # Interface principal
 st.header("📁 Configuração Inicial")
@@ -66,12 +75,18 @@ if 'df_mae' in st.session_state:
                 if len(codigos_faltantes) > 0:
                     st.warning(f"⚠️ {len(codigos_faltantes)} códigos faltantes")
                     
-                    # Mostrar códigos faltantes
-                    with st.expander("Ver códigos faltantes"):
-                        st.write(list(codigos_faltantes))
+                    # Download códigos faltantes
+                    df_faltantes = pd.DataFrame({'codigo': codigos_faltantes})
+                    excel_faltantes = gerar_excel_download(df_faltantes, "codigos_faltantes")
+                    st.download_button(
+                        label="📥 Baixar Códigos Faltantes",
+                        data=excel_faltantes,
+                        file_name="codigos_faltantes.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
                 
                 if not dados_validos.empty:
-                    st.success(f"✅ Processando {len(dados_validos)} itens válidos")
+                    st.success(f"✅ Gerando relatórios com {len(dados_validos)} itens")
                     
                     # Resumo do Dia
                     st.header("📈 Resumo do Dia")
@@ -105,9 +120,54 @@ if 'df_mae' in st.session_state:
                         else:
                             st.info("Nenhuma venda Mijão hoje")
                     
-                    # Mostrar dados processados
-                    st.subheader("📋 Dados Processados")
-                    st.dataframe(dados_validos[['código', 'quantidade', 'semi', 'gola', 'bordado']], use_container_width=True)
+                    # Relatórios para Download
+                    st.subheader("📊 Relatórios para Download")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        # Relatório de Componentes
+                        relatorio_componentes = dados_validos.groupby(['semi', 'gola', 'bordado'])['quantidade'].sum().reset_index()
+                        excel_componentes = gerar_excel_download(relatorio_componentes, "relatorio_componentes")
+                        st.download_button(
+                            label="📥 Relatório Componentes",
+                            data=excel_componentes,
+                            file_name="relatorio_componentes.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    
+                    with col2:
+                        # Resumo Semis
+                        resumo_semis = dados_validos.groupby('semi')['quantidade'].sum().reset_index()
+                        excel_semis = gerar_excel_download(resumo_semis, "resumo_semis")
+                        st.download_button(
+                            label="📥 Resumo Semis",
+                            data=excel_semis,
+                            file_name="resumo_semis.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    
+                    with col3:
+                        # Relatório Golas
+                        relatorio_golas = dados_validos.groupby('gola')['quantidade'].sum().reset_index()
+                        excel_golas = gerar_excel_download(relatorio_golas, "relatorio_golas")
+                        st.download_button(
+                            label="📥 Relatório Golas",
+                            data=excel_golas,
+                            file_name="relatorio_golas.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    
+                    with col4:
+                        # Relatório Bordados
+                        relatorio_bordados = dados_validos.groupby('bordado')['quantidade'].sum().reset_index()
+                        excel_bordados = gerar_excel_download(relatorio_bordados, "relatorio_bordados")
+                        st.download_button(
+                            label="📥 Relatório Bordados",
+                            data=excel_bordados,
+                            file_name="relatorio_bordados.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
                     
             else:
                 st.error("Planilha deve ter colunas 'código' e 'quantidade'")
@@ -115,7 +175,7 @@ if 'df_mae' in st.session_state:
         except Exception as e:
             st.error(f"Erro ao processar vendas: {str(e)}")
 
-# Controle de Estoque Simples
+# Controle de Estoque
 st.header("📦 Controle de Estoque")
 
 if 'df_mae' in st.session_state:
@@ -151,4 +211,4 @@ else:
     st.info("Carregue a Planilha Mãe primeiro para usar o controle de estoque")
 
 st.markdown("---")
-st.markdown("**Pure & Posh Baby** - Sistema de Relatórios v1.0 (Cloud)")
+st.markdown("**Pure & Posh Baby** - Sistema de Relatórios v1.0")

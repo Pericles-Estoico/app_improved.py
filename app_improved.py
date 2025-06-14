@@ -3,6 +3,8 @@ import pandas as pd
 from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side
+import os
+import pickle
 
 # Configurações
 st.set_page_config(page_title="Pure & Posh Baby - Sistema de Relatórios", page_icon="👑", layout="wide")
@@ -28,9 +30,23 @@ st.title("👑 Sistema de Relatórios de Vendas")
 st.markdown("**Pure & Posh Baby**")
 st.markdown('</div>', unsafe_allow_html=True)
 
+# Arquivos para persistência
+ESTOQUE_FILE = "estoque.pkl"
+
 # Função para carregar Excel
 def load_excel(arquivo):
     return pd.read_excel(arquivo)
+
+# Funções de estoque
+def salvar_estoque(estoque_df):
+    with open(ESTOQUE_FILE, 'wb') as f:
+        pickle.dump(estoque_df, f)
+
+def carregar_estoque():
+    if os.path.exists(ESTOQUE_FILE):
+        with open(ESTOQUE_FILE, 'rb') as f:
+            return pickle.load(f)
+    return pd.DataFrame(columns=['codigo', 'semi', 'gola', 'bordado', 'quantidade'])
 
 # Função para determinar categoria e ordem
 def get_categoria_ordem(semi):
@@ -417,6 +433,120 @@ if 'df_mae' in st.session_state:
                 
         except Exception as e:
             st.error(f"Erro ao processar vendas: {str(e)}")
+
+# CONTROLE DE ESTOQUE - REINTEGRADO
+if 'df_mae' in st.session_state:
+    st.header("📦 Controle de Estoque")
+    st.subheader("Adicionar/Atualizar Estoque Manualmente")
+
+    # BUSCA MELHORADA COM MULTISELECT
+    st.write("**Digite para buscar itens:**")
+    
+    # Criar lista de opções para busca
+    all_options = []
+    df_mae = st.session_state['df_mae']
+    if not df_mae.empty:
+        # Combinar código + descrição para facilitar busca
+        for _, row in df_mae.iterrows():
+            codigo = str(row.get('codigo', ''))
+            semi = str(row.get('semi', ''))
+            gola = str(row.get('gola', ''))
+            bordado = str(row.get('bordado', ''))
+            
+            # Adicionar opções formatadas
+            if codigo and codigo != 'nan':
+                all_options.append(f"{codigo}")
+            if semi and semi != 'nan':
+                all_options.append(f"{semi}")
+            if gola and gola != 'nan':
+                all_options.append(f"{gola}")
+            if bordado and bordado != 'nan':
+                all_options.append(f"{bordado}")
+    
+    # Remover duplicatas e ordenar
+    all_options = sorted(list(set(all_options)))
+    
+    # Campo de busca com multiselect (permite busca)
+    selected_items = st.multiselect(
+        "Busque e selecione o item:",
+        options=all_options,
+        max_selections=1,
+        help="Digite para filtrar os itens"
+    )
+    
+    # Item selecionado
+    selected_item = selected_items[0] if selected_items else ""
+    
+    if selected_item:
+        st.success(f"Item selecionado: {selected_item}")
+    quantidade_adicionar = st.number_input("Quantidade a Adicionar/Remover", value=0, step=1)
+
+    if st.button("Adicionar/Atualizar Estoque"):
+        item_to_process = selected_item
+        
+        if item_to_process:
+            estoque_df = carregar_estoque()
+            
+            # Find the item in df_mae to get its semi, gola, bordado for new stock entries
+            matched_item_info = df_mae[(df_mae['codigo'] == item_to_process) |
+                                       (df_mae['semi'] == item_to_process) |
+                                       (df_mae['gola'] == item_to_process) |
+                                       (df_mae['bordado'] == item_to_process)]
+            
+            item_semi = ''
+            item_gola = ''
+            item_bordado = ''
+
+            if not matched_item_info.empty:
+                # Take the first match
+                item_semi = matched_item_info['semi'].iloc[0] if 'semi' in matched_item_info.columns else ''
+                item_gola = matched_item_info['gola'].iloc[0] if 'gola' in matched_item_info.columns else ''
+                item_bordado = matched_item_info['bordado'].iloc[0] if 'bordado' in matched_item_info.columns else ''
+            else:
+                st.warning(f"Item '{item_to_process}' não encontrado na Planilha Mãe. Adicionando ao estoque sem detalhes de semi/gola/bordado.")
+
+            # Verificar se já existe no estoque
+            existing_idx = estoque_df[
+                (estoque_df['semi'] == item_semi) & 
+                (estoque_df['gola'] == item_gola) & 
+                (estoque_df['bordado'] == item_bordado)
+            ].index
+
+            if not existing_idx.empty:
+                estoque_df.loc[existing_idx, 'quantidade'] += quantidade_adicionar
+            else:
+                novo_item_estoque = pd.DataFrame([{
+                    'codigo': item_to_process, 
+                    'semi': item_semi, 
+                    'gola': item_gola, 
+                    'bordado': item_bordado, 
+                    'quantidade': quantidade_adicionar
+                }])
+                estoque_df = pd.concat([estoque_df, novo_item_estoque], ignore_index=True)
+            
+            salvar_estoque(estoque_df)
+            st.success(f"Estoque de '{item_to_process}' atualizado!")
+        else:
+            st.warning("Por favor, selecione ou digite um item.")
+
+    st.subheader("Estoque Atual - Resumo")
+    estoque_df = carregar_estoque()
+    if not estoque_df.empty:
+        # EXIBIÇÃO SIMPLIFICADA - apenas semi, gola, bordado e quantidade
+        estoque_resumo = estoque_df[['semi', 'gola', 'bordado', 'quantidade']].copy()
+        estoque_resumo = estoque_resumo[estoque_resumo['quantidade'] != 0]  # Ocultar itens com quantidade zero
+        st.dataframe(estoque_resumo.sort_values(by=['semi', 'gola', 'bordado']))
+        
+        # Botão para baixar estoque
+        excel_estoque = gerar_excel_formatado(estoque_resumo, "estoque_atual")
+        st.download_button(
+            label="📥 Baixar Estoque Atual",
+            data=excel_estoque,
+            file_name="estoque_atual.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.info("Estoque vazio.")
 
 st.markdown("---")
 st.markdown("**Pure & Posh Baby** - Sistema de Relatórios v1.0")

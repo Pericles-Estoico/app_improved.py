@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Border, Side
 
 # Configurações
 st.set_page_config(page_title="Pure & Posh Baby - Sistema de Relatórios", page_icon="👑", layout="wide")
@@ -25,11 +27,80 @@ st.markdown('</div>', unsafe_allow_html=True)
 def load_excel(arquivo):
     return pd.read_excel(arquivo)
 
-# Função para gerar Excel para download
-def gerar_excel_download(df, nome_arquivo):
+# Função para gerar Excel formatado
+def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Relatório')
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Relatório"
+    
+    # Estilos
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    semi_fill = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")
+    semi_font = Font(bold=True)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Cabeçalhos
+    headers = list(df.columns)
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.border = border
+    
+    if agrupar_por_semi:
+        # Agrupar por semi e aplicar formatação
+        row_num = 2
+        current_semi = None
+        
+        for _, row in df.iterrows():
+            if row['semi'] != current_semi:
+                # Nova linha de semi
+                current_semi = row['semi']
+                
+                # Linha do semi
+                for col_num, value in enumerate(row, 1):
+                    cell = ws.cell(row=row_num, column=col_num, value=value)
+                    if col_num == 1:  # Coluna semi
+                        cell.fill = semi_fill
+                        cell.font = semi_font
+                    cell.border = border
+                row_num += 1
+            else:
+                # Linha de componente
+                for col_num, value in enumerate(row, 1):
+                    cell = ws.cell(row=row_num, column=col_num, value=value)
+                    if col_num == 1:  # Deixar semi vazio para componentes
+                        cell.value = ""
+                    cell.border = border
+                row_num += 1
+    else:
+        # Formato simples
+        for row_num, (_, row) in enumerate(df.iterrows(), 2):
+            for col_num, value in enumerate(row, 1):
+                cell = ws.cell(row=row_num, column=col_num, value=value)
+                cell.border = border
+    
+    # Ajustar largura das colunas
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 50)
+        ws.column_dimensions[column_letter].width = adjusted_width
+    
+    wb.save(output)
     output.seek(0)
     return output
 
@@ -77,7 +148,7 @@ if 'df_mae' in st.session_state:
                     
                     # Download códigos faltantes
                     df_faltantes = pd.DataFrame({'codigo': codigos_faltantes})
-                    excel_faltantes = gerar_excel_download(df_faltantes, "codigos_faltantes")
+                    excel_faltantes = gerar_excel_formatado(df_faltantes, "codigos_faltantes")
                     st.download_button(
                         label="📥 Baixar Códigos Faltantes",
                         data=excel_faltantes,
@@ -95,7 +166,7 @@ if 'df_mae' in st.session_state:
                     
                     with col1:
                         st.subheader("👔 Manga Longa")
-                        ml_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Longa|ML|manga longa', na=False, case=False)]
+                        ml_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Longa', na=False)]
                         if not ml_resumo.empty:
                             total_ml = ml_resumo['quantidade'].sum()
                             st.metric("Total ML", total_ml)
@@ -104,7 +175,7 @@ if 'df_mae' in st.session_state:
                     
                     with col2:
                         st.subheader("👗 Manga Curta")
-                        mc_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Curta|MC|manga curta', na=False, case=False)]
+                        mc_resumo = dados_validos[dados_validos['semi'].str.contains('Manga Curta', na=False)]
                         if not mc_resumo.empty:
                             total_mc = mc_resumo['quantidade'].sum()
                             st.metric("Total MC", total_mc)
@@ -113,7 +184,7 @@ if 'df_mae' in st.session_state:
                     
                     with col3:
                         st.subheader("👶 Mijões")
-                        mij_resumo = dados_validos[dados_validos['semi'].str.contains('Mijão|Mijao|mijão|mijao', na=False, case=False)]
+                        mij_resumo = dados_validos[dados_validos['semi'].str.contains('Mijão|Mijao', na=False)]
                         if not mij_resumo.empty:
                             total_mij = mij_resumo['quantidade'].sum()
                             st.metric("Total Mijões", total_mij)
@@ -128,7 +199,8 @@ if 'df_mae' in st.session_state:
                     with col1:
                         # Relatório de Componentes
                         relatorio_componentes = dados_validos.groupby(['semi', 'gola', 'bordado'])['quantidade'].sum().reset_index()
-                        excel_componentes = gerar_excel_download(relatorio_componentes, "relatorio_componentes")
+                        relatorio_componentes = relatorio_componentes.sort_values(['semi', 'gola', 'bordado'])
+                        excel_componentes = gerar_excel_formatado(relatorio_componentes, "relatorio_componentes", agrupar_por_semi=True)
                         st.download_button(
                             label="📥 Relatório Componentes",
                             data=excel_componentes,
@@ -139,7 +211,7 @@ if 'df_mae' in st.session_state:
                     with col2:
                         # Resumo Semis
                         resumo_semis = dados_validos.groupby('semi')['quantidade'].sum().reset_index()
-                        excel_semis = gerar_excel_download(resumo_semis, "resumo_semis")
+                        excel_semis = gerar_excel_formatado(resumo_semis, "resumo_semis")
                         st.download_button(
                             label="📥 Resumo Semis",
                             data=excel_semis,
@@ -150,7 +222,7 @@ if 'df_mae' in st.session_state:
                     with col3:
                         # Relatório Golas
                         relatorio_golas = dados_validos.groupby('gola')['quantidade'].sum().reset_index()
-                        excel_golas = gerar_excel_download(relatorio_golas, "relatorio_golas")
+                        excel_golas = gerar_excel_formatado(relatorio_golas, "relatorio_golas")
                         st.download_button(
                             label="📥 Relatório Golas",
                             data=excel_golas,
@@ -161,7 +233,7 @@ if 'df_mae' in st.session_state:
                     with col4:
                         # Relatório Bordados
                         relatorio_bordados = dados_validos.groupby('bordado')['quantidade'].sum().reset_index()
-                        excel_bordados = gerar_excel_download(relatorio_bordados, "relatorio_bordados")
+                        excel_bordados = gerar_excel_formatado(relatorio_bordados, "relatorio_bordados")
                         st.download_button(
                             label="📥 Relatório Bordados",
                             data=excel_bordados,

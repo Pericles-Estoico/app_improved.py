@@ -1,1 +1,30 @@
+from flask import Flask, request, jsonify
+import pandas as pd
+import os
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🟢 API ativa - resumo-de-vendas"
+
+@app.route('/upload-relatorio', methods=['POST'])
+def upload_relatorio():
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'status': 'erro', 'mensagem': 'JSON vazio'}), 400
+
+        df = pd.DataFrame(data)
+        df.to_csv("relatorio_recebido.csv", index=False)
+
+        return jsonify({'status': 'sucesso', 'linhas_recebidas': len(df)})
+
+    except Exception as e:
+        return jsonify({'status': 'erro', 'mensagem': str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(debug=False, host='0.0.0.0', port=port)
 

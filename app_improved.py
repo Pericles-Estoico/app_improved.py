@@ -424,7 +424,10 @@ if relatorio_faltantes is not None and st.session_state['planilha_mae_carregada'
             except Exception as e:
                 st.error(f"❌ Erro ao atualizar planilha mãe: {e}")
                 
-elif relatorio_faltantes is not None and not st.session_state['planilha_mae_carregada']:
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar relatório de faltantes: {e}")
+
+if relatorio_faltantes is not None and not st.session_state['planilha_mae_carregada']:
     st.warning("⚠️ Carregue primeiro a planilha mãe para poder atualizá-la com os faltantes.")
 
 st.markdown("---")

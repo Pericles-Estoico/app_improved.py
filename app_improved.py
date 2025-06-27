@@ -5,6 +5,7 @@ from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side
 import os
 import pickle
+import json
 
 # Configurações
 st.set_page_config(page_title="Pure & Posh Baby - Sistema de Relatórios", page_icon="👑", layout="wide")
@@ -30,35 +31,16 @@ st.title("👑 Sistema de Relatórios de Vendas")
 st.markdown("**Pure & Posh Baby**")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Arquivos para persistência
-ESTOQUE_FILE = "estoque.pkl"
-PLANILHA_MAE_FILE = "planilha_mae.pkl"
+# Inicializar session_state para planilha mãe
+if 'planilha_mae_carregada' not in st.session_state:
+    st.session_state['planilha_mae_carregada'] = False
+
+if 'df_mae' not in st.session_state:
+    st.session_state['df_mae'] = None
 
 # Função para carregar Excel
 def load_excel(arquivo):
     return pd.read_excel(arquivo)
-
-# Funções de estoque
-def salvar_estoque(estoque_df):
-    with open(ESTOQUE_FILE, 'wb') as f:
-        pickle.dump(estoque_df, f)
-
-def carregar_estoque():
-    if os.path.exists(ESTOQUE_FILE):
-        with open(ESTOQUE_FILE, 'rb') as f:
-            return pickle.load(f)
-    return pd.DataFrame(columns=['codigo', 'semi', 'gola', 'bordado', 'quantidade'])
-
-# Funções da Planilha Mãe
-def salvar_planilha_mae(df_mae):
-    with open(PLANILHA_MAE_FILE, 'wb') as f:
-        pickle.dump(df_mae, f)
-
-def carregar_planilha_mae():
-    if os.path.exists(PLANILHA_MAE_FILE):
-        with open(PLANILHA_MAE_FILE, 'rb') as f:
-            return pickle.load(f)
-    return None
 
 # Função para determinar categoria e ordem
 def get_categoria_ordem(semi):
@@ -265,16 +247,13 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
 # Interface principal
 st.header("📁 Configuração Inicial")
 
-# Carregar planilha mãe existente
-df_mae_existente = carregar_planilha_mae()
-
-if df_mae_existente is not None:
-    st.success(f"✅ Planilha Mãe carregada: {len(df_mae_existente)} produtos cadastrados")
-    st.session_state['df_mae'] = df_mae_existente
+# Verificar se planilha mãe já está carregada
+if st.session_state['planilha_mae_carregada'] and st.session_state['df_mae'] is not None:
+    st.success(f"✅ Planilha Mãe carregada: {len(st.session_state['df_mae'])} produtos cadastrados")
     
     # Mostrar opção para recarregar planilha mãe
     with st.expander("🔄 Recarregar Planilha Mãe (opcional)"):
-        st.info("A Planilha Mãe já está carregada. Use esta opção apenas se precisar substituí-la completamente.")
+        st.info("A Planilha Mãe já está carregada na sessão. Use esta opção apenas se precisar substituí-la completamente.")
         uploaded_mae_nova = st.file_uploader("📋 Nova Planilha Mãe", type=["xlsx"], key="planilha_mae_nova")
         
         if uploaded_mae_nova:
@@ -283,18 +262,18 @@ if df_mae_existente is not None:
                     df_mae_nova = load_excel(uploaded_mae_nova)
                     df_mae_nova.columns = df_mae_nova.columns.str.strip().str.replace(" ", "_").str.lower()
                     
-                    # Salvar nova planilha mãe
-                    salvar_planilha_mae(df_mae_nova)
+                    # Salvar nova planilha mãe na sessão
                     st.session_state['df_mae'] = df_mae_nova
+                    st.session_state['planilha_mae_carregada'] = True
                     
-                    st.success(f"✅ Nova Planilha Mãe salva: {len(df_mae_nova)} registros")
+                    st.success(f"✅ Nova Planilha Mãe carregada: {len(df_mae_nova)} registros")
                     st.rerun()
                     
                 except Exception as e:
                     st.error(f"Erro ao carregar nova planilha mãe: {str(e)}")
 else:
-    # Upload da Planilha Mãe (primeira vez)
-    st.info("📋 Carregue a Planilha Mãe pela primeira vez")
+    # Upload da Planilha Mãe (primeira vez ou se não estiver carregada)
+    st.info("📋 Carregue a Planilha Mãe para começar")
     uploaded_mae = st.file_uploader("📋 Carregar Planilha Mãe", type=["xlsx"], key="planilha_mae")
 
     if uploaded_mae:
@@ -302,18 +281,19 @@ else:
             df_mae = load_excel(uploaded_mae)
             df_mae.columns = df_mae.columns.str.strip().str.replace(" ", "_").str.lower()
             
-            # Salvar planilha mãe permanentemente
-            salvar_planilha_mae(df_mae)
+            # Salvar planilha mãe na sessão
             st.session_state['df_mae'] = df_mae
+            st.session_state['planilha_mae_carregada'] = True
             
-            st.success(f"✅ Planilha Mãe salva permanentemente: {len(df_mae)} registros")
+            st.success(f"✅ Planilha Mãe carregada na sessão: {len(df_mae)} registros")
+            st.info("💡 A planilha ficará disponível durante toda esta sessão")
             st.rerun()
             
         except Exception as e:
             st.error(f"Erro ao carregar planilha mãe: {str(e)}")
 
 # Processamento de vendas
-if 'df_mae' in st.session_state:
+if st.session_state['planilha_mae_carregada'] and st.session_state['df_mae'] is not None:
     st.header("📊 Processamento Diário")
     
     uploaded_vendas = st.file_uploader("📈 Planilha de Vendas (diária)", type=["xlsx"], key="vendas")
@@ -369,11 +349,10 @@ if 'df_mae' in st.session_state:
                                     df_mae_atualizada = pd.concat([st.session_state['df_mae'], df_novos], ignore_index=True)
                                     df_mae_atualizada = df_mae_atualizada.drop_duplicates(subset=['codigo'], keep='last')
                                     
-                                    # Salvar planilha mãe atualizada permanentemente
-                                    salvar_planilha_mae(df_mae_atualizada)
+                                    # Atualizar planilha mãe na sessão
                                     st.session_state['df_mae'] = df_mae_atualizada
                                     
-                                    st.success(f"✅ {len(df_novos)} produtos adicionados permanentemente à planilha mãe!")
+                                    st.success(f"✅ {len(df_novos)} produtos adicionados à planilha mãe da sessão!")
                                     st.info("🔄 Reprocesse a planilha de vendas para ver os novos produtos")
                                     
                                     # Botão para baixar planilha mãe atualizada
@@ -484,40 +463,7 @@ if 'df_mae' in st.session_state:
         except Exception as e:
             st.error(f"Erro ao processar planilha de vendas: {str(e)}")
 
-# Seção de Gestão de Estoque (opcional)
-with st.expander("📦 Gestão de Estoque (Opcional)"):
-    st.info("Esta seção permite gerenciar estoque, mas é independente dos relatórios de vendas")
-    
-    # Carregar estoque existente
-    estoque_atual = carregar_estoque()
-    
-    if not estoque_atual.empty:
-        st.write("📊 Estoque Atual:")
-        st.dataframe(estoque_atual)
-        
-        # Download do estoque
-        excel_estoque = gerar_excel_formatado(estoque_atual, "estoque_atual")
-        st.download_button(
-            label="📥 Baixar Estoque Atual",
-            data=excel_estoque,
-            file_name="estoque_atual.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    
-    # Upload de novo estoque
-    uploaded_estoque = st.file_uploader("📤 Atualizar Estoque", type=["xlsx"], key="estoque")
-    
-    if uploaded_estoque:
-        try:
-            novo_estoque = load_excel(uploaded_estoque)
-            novo_estoque.columns = novo_estoque.columns.str.strip().str.replace(" ", "_").str.lower()
-            
-            if all(col in novo_estoque.columns for col in ['codigo', 'semi', 'gola', 'bordado', 'quantidade']):
-                salvar_estoque(novo_estoque)
-                st.success(f"✅ Estoque atualizado: {len(novo_estoque)} itens")
-                st.rerun()
-            else:
-                st.error("❌ Planilha de estoque deve ter colunas: codigo, semi, gola, bordado, quantidade")
-        except Exception as e:
-            st.error(f"Erro ao carregar estoque: {str(e)}")
+# Aviso sobre persistência
+st.sidebar.markdown("---")
+st.sidebar.info("💡 **Sobre a Planilha Mãe:**\n\nA planilha fica carregada durante toda esta sessão do navegador. Se fechar e abrir novamente, precisará carregar a planilha mãe novamente.")
 

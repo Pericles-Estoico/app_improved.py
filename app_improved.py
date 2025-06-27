@@ -32,6 +32,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # Arquivos para persistência
 ESTOQUE_FILE = "estoque.pkl"
+PLANILHA_MAE_FILE = "planilha_mae.pkl"
 
 # Função para carregar Excel
 def load_excel(arquivo):
@@ -47,6 +48,17 @@ def carregar_estoque():
         with open(ESTOQUE_FILE, 'rb') as f:
             return pickle.load(f)
     return pd.DataFrame(columns=['codigo', 'semi', 'gola', 'bordado', 'quantidade'])
+
+# Funções da Planilha Mãe
+def salvar_planilha_mae(df_mae):
+    with open(PLANILHA_MAE_FILE, 'wb') as f:
+        pickle.dump(df_mae, f)
+
+def carregar_planilha_mae():
+    if os.path.exists(PLANILHA_MAE_FILE):
+        with open(PLANILHA_MAE_FILE, 'rb') as f:
+            return pickle.load(f)
+    return None
 
 # Função para determinar categoria e ordem
 def get_categoria_ordem(semi):
@@ -253,20 +265,52 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
 # Interface principal
 st.header("📁 Configuração Inicial")
 
-# Upload da Planilha Mãe
-uploaded_mae = st.file_uploader("📋 Carregar Planilha Mãe", type=["xlsx"], key="planilha_mae")
+# Carregar planilha mãe existente
+df_mae_existente = carregar_planilha_mae()
 
-if uploaded_mae:
-    try:
-        df_mae = load_excel(uploaded_mae)
-        df_mae.columns = df_mae.columns.str.strip().str.replace(" ", "_").str.lower()
-        st.success(f"✅ Planilha Mãe carregada: {len(df_mae)} registros")
+if df_mae_existente is not None:
+    st.success(f"✅ Planilha Mãe carregada: {len(df_mae_existente)} produtos cadastrados")
+    st.session_state['df_mae'] = df_mae_existente
+    
+    # Mostrar opção para recarregar planilha mãe
+    with st.expander("🔄 Recarregar Planilha Mãe (opcional)"):
+        st.info("A Planilha Mãe já está carregada. Use esta opção apenas se precisar substituí-la completamente.")
+        uploaded_mae_nova = st.file_uploader("📋 Nova Planilha Mãe", type=["xlsx"], key="planilha_mae_nova")
         
-        # Armazenar na sessão
-        st.session_state['df_mae'] = df_mae
-        
-    except Exception as e:
-        st.error(f"Erro ao carregar planilha mãe: {str(e)}")
+        if uploaded_mae_nova:
+            if st.button("⚠️ Confirmar Substituição da Planilha Mãe"):
+                try:
+                    df_mae_nova = load_excel(uploaded_mae_nova)
+                    df_mae_nova.columns = df_mae_nova.columns.str.strip().str.replace(" ", "_").str.lower()
+                    
+                    # Salvar nova planilha mãe
+                    salvar_planilha_mae(df_mae_nova)
+                    st.session_state['df_mae'] = df_mae_nova
+                    
+                    st.success(f"✅ Nova Planilha Mãe salva: {len(df_mae_nova)} registros")
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Erro ao carregar nova planilha mãe: {str(e)}")
+else:
+    # Upload da Planilha Mãe (primeira vez)
+    st.info("📋 Carregue a Planilha Mãe pela primeira vez")
+    uploaded_mae = st.file_uploader("📋 Carregar Planilha Mãe", type=["xlsx"], key="planilha_mae")
+
+    if uploaded_mae:
+        try:
+            df_mae = load_excel(uploaded_mae)
+            df_mae.columns = df_mae.columns.str.strip().str.replace(" ", "_").str.lower()
+            
+            # Salvar planilha mãe permanentemente
+            salvar_planilha_mae(df_mae)
+            st.session_state['df_mae'] = df_mae
+            
+            st.success(f"✅ Planilha Mãe salva permanentemente: {len(df_mae)} registros")
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Erro ao carregar planilha mãe: {str(e)}")
 
 # Processamento de vendas
 if 'df_mae' in st.session_state:
@@ -325,10 +369,11 @@ if 'df_mae' in st.session_state:
                                     df_mae_atualizada = pd.concat([st.session_state['df_mae'], df_novos], ignore_index=True)
                                     df_mae_atualizada = df_mae_atualizada.drop_duplicates(subset=['codigo'], keep='last')
                                     
-                                    # Atualizar na sessão
+                                    # Salvar planilha mãe atualizada permanentemente
+                                    salvar_planilha_mae(df_mae_atualizada)
                                     st.session_state['df_mae'] = df_mae_atualizada
                                     
-                                    st.success(f"✅ {len(df_novos)} produtos adicionados à planilha mãe!")
+                                    st.success(f"✅ {len(df_novos)} produtos adicionados permanentemente à planilha mãe!")
                                     st.info("🔄 Reprocesse a planilha de vendas para ver os novos produtos")
                                     
                                     # Botão para baixar planilha mãe atualizada
@@ -387,9 +432,8 @@ if 'df_mae' in st.session_state:
                     with col1:
                         # Relatório de Componentes com ordenação correta
                         excel_componentes = gerar_excel_formatado(dados_validos, "relatorio_componentes", agrupar_por_semi=True)
-                        
                         st.download_button(
-                            label="📥 Relatório Componentes",
+                            label="📋 Relatório Componentes",
                             data=excel_componentes,
                             file_name="relatorio_componentes.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -398,9 +442,15 @@ if 'df_mae' in st.session_state:
                     with col2:
                         # Resumo Semis
                         resumo_semis = dados_validos.groupby('semi')['quantidade'].sum().reset_index()
+                        resumo_semis[['categoria', 'cor_ordem', 'tamanho_ordem']] = resumo_semis['semi'].apply(
+                            lambda x: pd.Series(get_categoria_ordem(x))
+                        )
+                        resumo_semis = resumo_semis.sort_values(['categoria', 'cor_ordem', 'tamanho_ordem', 'semi'])
+                        resumo_semis = resumo_semis[['semi', 'quantidade']]
+                        
                         excel_semis = gerar_excel_formatado(resumo_semis, "resumo_semis")
                         st.download_button(
-                            label="📥 Resumo Semis",
+                            label="📊 Resumo Semis",
                             data=excel_semis,
                             file_name="resumo_semis.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -408,10 +458,10 @@ if 'df_mae' in st.session_state:
                     
                     with col3:
                         # Relatório Golas
-                        relatorio_golas = dados_validos.groupby('gola')['quantidade'].sum().reset_index()
+                        relatorio_golas = dados_validos.groupby('gola')['quantidade'].sum().reset_index().sort_values('quantidade', ascending=False)
                         excel_golas = gerar_excel_formatado(relatorio_golas, "relatorio_golas")
                         st.download_button(
-                            label="📥 Relatório Golas",
+                            label="👔 Relatório Golas",
                             data=excel_golas,
                             file_name="relatorio_golas.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -419,156 +469,55 @@ if 'df_mae' in st.session_state:
                     
                     with col4:
                         # Relatório Bordados
-                        relatorio_bordados = dados_validos.groupby('bordado')['quantidade'].sum().reset_index()
+                        relatorio_bordados = dados_validos.groupby('bordado')['quantidade'].sum().reset_index().sort_values('quantidade', ascending=False)
                         excel_bordados = gerar_excel_formatado(relatorio_bordados, "relatorio_bordados")
                         st.download_button(
-                            label="📥 Relatório Bordados",
+                            label="🎨 Relatório Bordados",
                             data=excel_bordados,
                             file_name="relatorio_bordados.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
-                    
+                
             else:
-                st.error("Planilha deve ter colunas 'código' e 'quantidade'")
+                st.error("❌ Planilha de vendas deve ter colunas 'código' e 'quantidade'")
                 
         except Exception as e:
-            st.error(f"Erro ao processar vendas: {str(e)}")
+            st.error(f"Erro ao processar planilha de vendas: {str(e)}")
 
-# CONTROLE DE ESTOQUE - CORRIGIDO
-if 'df_mae' in st.session_state:
-    st.header("📦 Controle de Estoque")
-    st.subheader("Adicionar/Atualizar Estoque Manualmente")
-
-    # BUSCA MELHORADA - SEPARANDO TIPOS
-    st.write("**Selecione o tipo de entrada:**")
+# Seção de Gestão de Estoque (opcional)
+with st.expander("📦 Gestão de Estoque (Opcional)"):
+    st.info("Esta seção permite gerenciar estoque, mas é independente dos relatórios de vendas")
     
-    tipo_entrada = st.radio(
-        "Tipo de entrada:",
-        ["Semi (entrada geral)", "Produto específico (código)"],
-        help="Semi = entrada de estoque geral | Produto = entrada de item específico com gola e bordado"
-    )
+    # Carregar estoque existente
+    estoque_atual = carregar_estoque()
     
-    df_mae = st.session_state['df_mae']
-    
-    if tipo_entrada == "Semi (entrada geral)":
-        # Lista apenas os semis únicos
-        semis_unicos = sorted(df_mae['semi'].dropna().unique().tolist())
+    if not estoque_atual.empty:
+        st.write("📊 Estoque Atual:")
+        st.dataframe(estoque_atual)
         
-        selected_semi = st.selectbox(
-            "Selecione o Semi:",
-            options=[""] + semis_unicos,
-            help="Entrada de estoque geral para o semi (sem gola/bordado específicos)"
-        )
-        
-        if selected_semi:
-            st.success(f"Semi selecionado: {selected_semi}")
-            
-        quantidade_adicionar = st.number_input("Quantidade a Adicionar/Remover", value=0, step=1)
-
-        if st.button("Adicionar/Atualizar Estoque"):
-            if selected_semi:
-                estoque_df = carregar_estoque()
-                
-                # Para entrada de semi, usar campos genéricos
-                item_semi = selected_semi
-                item_gola = "GERAL"  # Marcador para entrada geral
-                item_bordado = "GERAL"  # Marcador para entrada geral
-                
-                # Verificar se já existe no estoque
-                existing_idx = estoque_df[
-                    (estoque_df['semi'] == item_semi) & 
-                    (estoque_df['gola'] == item_gola) & 
-                    (estoque_df['bordado'] == item_bordado)
-                ].index
-
-                if not existing_idx.empty:
-                    estoque_df.loc[existing_idx, 'quantidade'] += quantidade_adicionar
-                else:
-                    novo_item_estoque = pd.DataFrame([{
-                        'codigo': f"SEMI_{selected_semi}", 
-                        'semi': item_semi, 
-                        'gola': item_gola, 
-                        'bordado': item_bordado, 
-                        'quantidade': quantidade_adicionar
-                    }])
-                    estoque_df = pd.concat([estoque_df, novo_item_estoque], ignore_index=True)
-                
-                salvar_estoque(estoque_df)
-                st.success(f"Estoque do semi '{selected_semi}' atualizado!")
-            else:
-                st.warning("Por favor, selecione um semi.")
-    
-    else:  # Produto específico
-        # Lista todos os códigos
-        codigos_unicos = sorted(df_mae['codigo'].dropna().unique().tolist())
-        
-        selected_codigo = st.selectbox(
-            "Selecione o Código do Produto:",
-            options=[""] + codigos_unicos,
-            help="Entrada de estoque para produto específico (com gola e bordado)"
-        )
-        
-        if selected_codigo:
-            # Mostrar detalhes do produto
-            produto_info = df_mae[df_mae['codigo'] == selected_codigo].iloc[0]
-            st.info(f"**Semi:** {produto_info.get('semi', 'N/A')}")
-            st.info(f"**Gola:** {produto_info.get('gola', 'N/A')}")
-            st.info(f"**Bordado:** {produto_info.get('bordado', 'N/A')}")
-            
-        quantidade_adicionar = st.number_input("Quantidade a Adicionar/Remover", value=0, step=1, key="produto_qtd")
-
-        if st.button("Adicionar/Atualizar Estoque", key="produto_btn"):
-            if selected_codigo:
-                estoque_df = carregar_estoque()
-                
-                # Pegar informações do produto
-                produto_info = df_mae[df_mae['codigo'] == selected_codigo].iloc[0]
-                item_semi = produto_info.get('semi', '')
-                item_gola = produto_info.get('gola', '')
-                item_bordado = produto_info.get('bordado', '')
-                
-                # Verificar se já existe no estoque
-                existing_idx = estoque_df[
-                    (estoque_df['semi'] == item_semi) & 
-                    (estoque_df['gola'] == item_gola) & 
-                    (estoque_df['bordado'] == item_bordado)
-                ].index
-
-                if not existing_idx.empty:
-                    estoque_df.loc[existing_idx, 'quantidade'] += quantidade_adicionar
-                else:
-                    novo_item_estoque = pd.DataFrame([{
-                        'codigo': selected_codigo, 
-                        'semi': item_semi, 
-                        'gola': item_gola, 
-                        'bordado': item_bordado, 
-                        'quantidade': quantidade_adicionar
-                    }])
-                    estoque_df = pd.concat([estoque_df, novo_item_estoque], ignore_index=True)
-                
-                salvar_estoque(estoque_df)
-                st.success(f"Estoque do produto '{selected_codigo}' atualizado!")
-            else:
-                st.warning("Por favor, selecione um código.")
-
-    st.subheader("Estoque Atual - Resumo")
-    estoque_df = carregar_estoque()
-    if not estoque_df.empty:
-        # EXIBIÇÃO SIMPLIFICADA - apenas semi, gola, bordado e quantidade
-        estoque_resumo = estoque_df[['semi', 'gola', 'bordado', 'quantidade']].copy()
-        estoque_resumo = estoque_resumo[estoque_resumo['quantidade'] != 0]  # Ocultar itens com quantidade zero
-        st.dataframe(estoque_resumo.sort_values(by=['semi', 'gola', 'bordado']))
-        
-        # Botão para baixar estoque
-        excel_estoque = gerar_excel_formatado(estoque_resumo, "estoque_atual")
+        # Download do estoque
+        excel_estoque = gerar_excel_formatado(estoque_atual, "estoque_atual")
         st.download_button(
             label="📥 Baixar Estoque Atual",
             data=excel_estoque,
             file_name="estoque_atual.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    else:
-        st.info("Estoque vazio.")
+    
+    # Upload de novo estoque
+    uploaded_estoque = st.file_uploader("📤 Atualizar Estoque", type=["xlsx"], key="estoque")
+    
+    if uploaded_estoque:
+        try:
+            novo_estoque = load_excel(uploaded_estoque)
+            novo_estoque.columns = novo_estoque.columns.str.strip().str.replace(" ", "_").str.lower()
+            
+            if all(col in novo_estoque.columns for col in ['codigo', 'semi', 'gola', 'bordado', 'quantidade']):
+                salvar_estoque(novo_estoque)
+                st.success(f"✅ Estoque atualizado: {len(novo_estoque)} itens")
+                st.rerun()
+            else:
+                st.error("❌ Planilha de estoque deve ter colunas: codigo, semi, gola, bordado, quantidade")
+        except Exception as e:
+            st.error(f"Erro ao carregar estoque: {str(e)}")
 
-st.markdown("---")
-st.markdown("**Pure & Posh Baby** - Sistema de Relatórios v1.0")

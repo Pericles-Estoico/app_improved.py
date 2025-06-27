@@ -472,14 +472,10 @@ else:
                     # Preparar dados para relatórios
                     df_mae = st.session_state['df_mae']
                     
-                    # Verificar se as colunas necessárias existem
+                    # Verificar se as colunas necessárias existem na planilha mãe
                     colunas_necessarias = ['semi', 'gola', 'bordado']
                     if not all(col in df_mae.columns for col in colunas_necessarias):
                         st.error(f"❌ Planilha mãe deve conter as colunas: {colunas_necessarias}")
-                        st.stop()
-                    
-                    if not all(col in df_todos_pedidos.columns for col in colunas_necessarias):
-                        st.error(f"❌ Planilhas de pedidos devem conter as colunas: {colunas_necessarias}")
                         st.stop()
                     
                     # Criar chave única para merge

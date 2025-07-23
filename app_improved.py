@@ -82,18 +82,31 @@ def explodir_kits(df_vendas_com_mae, df_mae_completa):
             return []
 
         # 1. Adiciona componentes diretos do produto (se existirem)
-        # Verifica se 'semi' não é nulo (NaN) ou uma string vazia
-        if pd.notna(produto['semi']) and produto['semi'].strip() != '':
+        # CORREÇÃO: Verificação mais robusta para evitar erro de Series ambiguous
+        semi_valido = False
+        if 'semi' in produto.index:
+            if pd.notna(produto['semi']):
+                if isinstance(produto['semi'], str) and produto['semi'].strip() != '':
+                    semi_valido = True
+
+        if semi_valido:
             lista_componentes_recursiva.append({
                 'semi': produto['semi'],
-                'gola': produto['gola'],
-                'bordado': produto['bordado'],
+                'gola': produto['gola'] if pd.notna(produto['gola']) else '',
+                'bordado': produto['bordado'] if pd.notna(produto['bordado']) else '',
                 'quantidade': quantidade
             })
 
         # 2. Processa componentes aninhados (se existirem)
-        # Verifica se 'componentes_codigos' não é nulo (NaN) e não está vazio
-        if pd.notna(produto.get('componentes_codigos')) and str(produto['componentes_codigos']).strip() != '':
+        # CORREÇÃO: Verificação mais robusta para componentes_codigos
+        componentes_codigos_valido = False
+        if 'componentes_codigos' in produto.index:
+            if pd.notna(produto['componentes_codigos']):
+                componentes_str = str(produto['componentes_codigos']).strip()
+                if componentes_str != '' and componentes_str.lower() != 'nan':
+                    componentes_codigos_valido = True
+
+        if componentes_codigos_valido:
             codigos_aninhados = str(produto['componentes_codigos']).split(';')
             for cod_aninhado in codigos_aninhados:
                 cod_aninhado = cod_aninhado.strip()

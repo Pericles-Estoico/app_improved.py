@@ -43,20 +43,45 @@ def get_categoria_ordem(semi):
     """Determina a categoria e a ordem de um item 'semi' para ordenação nos relatórios."""
     semi_str = str(semi).lower()
     
-    # Mapeamentos para clareza e facilidade de manutenção
-    CATEGORIAS = {
-        'manga longa': 1,
-        'manga curta menina': 2,
-        'manga curta menino': 3,
-        'mijão': 4,
-        'mijao': 4
-    }
-    CORES = {'branco': 1, 'vermelho': 2, 'marinho': 3, 'azul': 4, 'rosa': 5}
-    TAMANHOS = {'-rn': 1, '-p': 2, '-m': 3, '-g': 4}
-
-    categoria = next((cat for key, cat in CATEGORIAS.items() if key in semi_str), 5)
-    cor_ordem = next((cor for key, cor in CORES.items() if key in semi_str), 6)
-    tamanho_ordem = next((tam for key, tam in TAMANHOS.items() if key in semi_str), 5)
+    # CORREÇÃO: Lógica de categorização mais precisa
+    categoria = 5  # Default para outros
+    if 'manga longa' in semi_str:
+        categoria = 1
+    elif 'manga curta' in semi_str:
+        if 'menina' in semi_str:
+            categoria = 2
+        elif 'menino' in semi_str:
+            categoria = 3
+        else:
+            categoria = 2  # Default para manga curta
+    elif 'mijão' in semi_str or 'mijao' in semi_str:
+        categoria = 4
+    
+    # CORREÇÃO: Ordem de cores mais abrangente
+    cor_ordem = 10  # Default
+    if 'branco' in semi_str:
+        cor_ordem = 1
+    elif 'off-white' in semi_str or 'off white' in semi_str:
+        cor_ordem = 2
+    elif 'rosa' in semi_str:
+        cor_ordem = 3
+    elif 'azul' in semi_str:
+        cor_ordem = 4
+    elif 'vermelho' in semi_str:
+        cor_ordem = 5
+    elif 'marinho' in semi_str:
+        cor_ordem = 6
+    
+    # CORREÇÃO: Ordem de tamanhos mais precisa
+    tamanho_ordem = 10  # Default
+    if '-rn' in semi_str or ' rn' in semi_str:
+        tamanho_ordem = 1
+    elif '-p' in semi_str or ' p' in semi_str:
+        tamanho_ordem = 2
+    elif '-m' in semi_str or ' m' in semi_str:
+        tamanho_ordem = 3
+    elif '-g' in semi_str or ' g' in semi_str:
+        tamanho_ordem = 4
     
     return categoria, cor_ordem, tamanho_ordem
 

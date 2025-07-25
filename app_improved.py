@@ -3,7 +3,7 @@ import pandas as pd
 from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side
-import numpy as np # Adicionado para lidar com valores nulos (NaN)
+import numpy as np
 
 # ==============================================================================
 # CONFIGURAÇÕES E ESTILOS
@@ -43,45 +43,41 @@ def get_categoria_ordem(semi):
     """Determina a categoria e a ordem de um item 'semi' para ordenação nos relatórios."""
     semi_str = str(semi).lower()
     
-    # CORREÇÃO: Lógica de categorização mais precisa
-    categoria = 5  # Default para outros
+    # RESTAURADO: Lógica original exata
     if 'manga longa' in semi_str:
         categoria = 1
-    elif 'manga curta' in semi_str:
-        if 'menina' in semi_str:
-            categoria = 2
-        elif 'menino' in semi_str:
-            categoria = 3
-        else:
-            categoria = 2  # Default para manga curta
+    elif 'manga curta menina' in semi_str:
+        categoria = 2
+    elif 'manga curta menino' in semi_str:
+        categoria = 3
     elif 'mijão' in semi_str or 'mijao' in semi_str:
         categoria = 4
+    else:
+        categoria = 5
     
-    # CORREÇÃO: Ordem de cores mais abrangente
-    cor_ordem = 10  # Default
     if 'branco' in semi_str:
         cor_ordem = 1
-    elif 'off-white' in semi_str or 'off white' in semi_str:
+    elif 'vermelho' in semi_str:
         cor_ordem = 2
-    elif 'rosa' in semi_str:
+    elif 'marinho' in semi_str:
         cor_ordem = 3
     elif 'azul' in semi_str:
         cor_ordem = 4
-    elif 'vermelho' in semi_str:
+    elif 'rosa' in semi_str:
         cor_ordem = 5
-    elif 'marinho' in semi_str:
+    else:
         cor_ordem = 6
     
-    # CORREÇÃO: Ordem de tamanhos mais precisa
-    tamanho_ordem = 10  # Default
-    if '-rn' in semi_str or ' rn' in semi_str:
+    if '-rn' in semi_str:
         tamanho_ordem = 1
-    elif '-p' in semi_str or ' p' in semi_str:
+    elif '-p' in semi_str:
         tamanho_ordem = 2
-    elif '-m' in semi_str or ' m' in semi_str:
+    elif '-m' in semi_str:
         tamanho_ordem = 3
-    elif '-g' in semi_str or ' g' in semi_str:
+    elif '-g' in semi_str:
         tamanho_ordem = 4
+    else:
+        tamanho_ordem = 5
     
     return categoria, cor_ordem, tamanho_ordem
 
@@ -102,12 +98,9 @@ def explodir_kits(df_vendas_com_mae, df_mae_completa):
         try:
             produto = df_mae_completa.loc[codigo]
         except KeyError:
-            # Se o código não for encontrado, retorna uma lista vazia.
-            # O tratamento de códigos faltantes já acontece antes.
             return []
 
         # 1. Adiciona componentes diretos do produto (se existirem)
-        # CORREÇÃO: Verificação mais robusta para evitar erro de Series ambiguous
         semi_valido = False
         if 'semi' in produto.index:
             if pd.notna(produto['semi']):
@@ -123,7 +116,6 @@ def explodir_kits(df_vendas_com_mae, df_mae_completa):
             })
 
         # 2. Processa componentes aninhados (se existirem)
-        # CORREÇÃO: Verificação mais robusta para componentes_codigos
         componentes_codigos_valido = False
         if 'componentes_codigos' in produto.index:
             if pd.notna(produto['componentes_codigos']):
@@ -136,7 +128,6 @@ def explodir_kits(df_vendas_com_mae, df_mae_completa):
             for cod_aninhado in codigos_aninhados:
                 cod_aninhado = cod_aninhado.strip()
                 if cod_aninhado:
-                    # Chamada recursiva para explodir os sub-componentes
                     lista_componentes_recursiva.extend(obter_componentes(cod_aninhado, quantidade))
         
         return lista_componentes_recursiva
@@ -146,7 +137,6 @@ def explodir_kits(df_vendas_com_mae, df_mae_completa):
         componentes_finais.extend(obter_componentes(venda['codigo'], venda['quantidade']))
 
     return pd.DataFrame(componentes_finais)
-
 
 def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
     """Gera um arquivo Excel formatado a partir de um DataFrame."""
@@ -198,7 +188,7 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
             
             for _, row in grupo.iterrows():
                 componente = f"{row['gola']} {row['bordado']}".strip()
-                if componente: # Só adiciona se houver gola ou bordado
+                if componente:
                     relatorio_hierarquico.append({
                         'Item': f"  {componente}", 'Quantidade': row['quantidade'], 'Check': '', 'categoria': categoria, 'is_semi': False
                     })
@@ -373,7 +363,6 @@ if st.session_state['planilha_mae_carregada']:
 
             if not dados_validos_df.empty:
                 with st.spinner("Explodindo kits e gerando relatórios..."):
-                    # AQUI A MÁGICA ACONTECE
                     dados_explodidos = explodir_kits(dados_validos_df, df_mae)
 
                 st.success(f"✅ Processamento concluído! {len(dados_explodidos)} componentes individuais encontrados.")

@@ -43,38 +43,42 @@ def get_categoria_ordem(semi):
     """Determina a categoria e a ordem de um item 'semi' para ordenação nos relatórios."""
     semi_str = str(semi).lower()
     
-    # RESTAURADO: Lógica original exata
+    # ORDEM CORRETA: 1=Manga Longa, 2=MC Menina, 3=MC Menino, 4=Mijão
     if 'manga longa' in semi_str:
         categoria = 1
-    elif 'manga curta menina' in semi_str:
+    elif 'manga curta' in semi_str and 'menina' in semi_str:
         categoria = 2
-    elif 'manga curta menino' in semi_str:
+    elif 'manga curta' in semi_str and 'menino' in semi_str:
         categoria = 3
     elif 'mijão' in semi_str or 'mijao' in semi_str:
         categoria = 4
     else:
         categoria = 5
     
+    # ORDEM DE COR: Branco primeiro
     if 'branco' in semi_str:
         cor_ordem = 1
-    elif 'vermelho' in semi_str:
+    elif 'off-white' in semi_str or 'off white' in semi_str:
         cor_ordem = 2
-    elif 'marinho' in semi_str:
+    elif 'rosa' in semi_str:
         cor_ordem = 3
     elif 'azul' in semi_str:
         cor_ordem = 4
-    elif 'rosa' in semi_str:
+    elif 'vermelho' in semi_str:
         cor_ordem = 5
-    else:
+    elif 'marinho' in semi_str:
         cor_ordem = 6
+    else:
+        cor_ordem = 7
     
-    if '-rn' in semi_str:
+    # ORDEM DE TAMANHO: RN, P, M, G
+    if '-rn' in semi_str or ' rn' in semi_str:
         tamanho_ordem = 1
-    elif '-p' in semi_str:
+    elif '-p' in semi_str or ' p' in semi_str:
         tamanho_ordem = 2
-    elif '-m' in semi_str:
+    elif '-m' in semi_str or ' m' in semi_str:
         tamanho_ordem = 3
-    elif '-g' in semi_str:
+    elif '-g' in semi_str or ' g' in semi_str:
         tamanho_ordem = 4
     else:
         tamanho_ordem = 5

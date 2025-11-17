@@ -14,11 +14,11 @@ import requests
 st.set_page_config(page_title="Pure & Posh Baby - Sistema de Relatórios", page_icon="👑", layout="wide")
 
 # 🔗 URL DA PLANILHA DE ESTOQUE (template_estoque) – APENAS LEITURA
-# use a MESMA planilha do cockpit; se mudar a planilha, só ajuste essa URL
+# Agora usando export?format=csv&gid=1456159896 (mesmo gid do link que você mandou)
 TEMPLATE_ESTOQUE_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1PpiMQingHf4llA03BiPIuPJPIZqul4grRU_emWDEK1o"
-    "/gviz/tq?tqx=out:csv&sheet=template_estoque"
+    "/export?format=csv&gid=1456159896"
 )
 
 # Header visual
@@ -30,7 +30,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="centered-title">', unsafe_allow_html=True)
-st.title("👑 Sistema de Relatórios de Vendas v4.0")
+st.title("👑 Sistema de Relatórios de Vendas v4.1")
 st.markdown("**Pure & Posh Baby**")
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -52,8 +52,7 @@ def load_excel(arquivo):
 @st.cache_data(ttl=60)
 def carregar_template_estoque_raw():
     """
-    Lê a aba 'template_estoque' do mesmo Google Sheets do cockpit.
-    Apenas leitura, nenhum tipo de escrita.
+    Lê a aba 'template_estoque' via gid, apenas leitura.
     """
     try:
         r = requests.get(TEMPLATE_ESTOQUE_URL, timeout=15)
@@ -61,8 +60,11 @@ def carregar_template_estoque_raw():
         df = pd.read_csv(StringIO(r.text))
         if df.empty:
             return None
+        # normaliza colunas
+        df.columns = df.columns.str.strip().str.lower()
         return df
-    except Exception:
+    except Exception as e:
+        st.warning(f"⚠️ Erro ao ler template_estoque: {e}")
         return None
 
 def get_categoria_ordem(semi):
@@ -336,9 +338,6 @@ def cruzar_com_estoque_insumos(dados_explodidos, df_estoque_raw):
       - Semis
       - Golas
       - Bordados (apenas quando não há gola)
-    
-    df_estoque_raw vem da aba template_estoque:
-      - precisa ter 'nome' e 'estoque_atual'
     """
     if df_estoque_raw is None or df_estoque_raw.empty:
         return None, None, None
@@ -470,10 +469,10 @@ else:
 # Carrega estoque online (produtos prontos + insumos)
 df_estoque_raw = carregar_template_estoque_raw()
 if df_estoque_raw is None:
-    st.warning("⚠️ Não foi possível carregar a aba `template_estoque` online. "
+    st.warning("⚠️ Não foi possível carregar a aba `template_estoque`. "
                "A lógica de falta de produto pronto será ignorada e o app trabalhará somente com as vendas.")
 else:
-    st.success("📦 Estoque (`template_estoque`) carregado para leitura.")
+    st.success(f"📦 Estoque (`template_estoque`) carregado ({len(df_estoque_raw)} linhas).")
 
 # --- Processamento de Vendas ---
 if st.session_state['planilha_mae_carregada']:
@@ -513,43 +512,55 @@ if st.session_state['planilha_mae_carregada']:
                 # ------------------------------------------------------------------
                 # 1) VERIFICA ESTOQUE DE PRODUTO PRONTO (template_estoque)
                 # ------------------------------------------------------------------
-                if df_estoque_raw is not None and 'codigo' in df_estoque_raw.columns and 'estoque_atual' in df_estoque_raw.columns:
-                    df_est_prod = df_estoque_raw[['codigo', 'nome', 'estoque_atual']].copy()
-                    df_est_prod['estoque_atual'] = pd.to_numeric(df_est_prod['estoque_atual'], errors='coerce').fillna(0)
+                if df_estoque_raw is not None:
+                    df_est_prod = df_estoque_raw.copy()
+                    # tenta achar coluna de código
+                    col_codigo_est = None
+                    for cand in ['codigo', 'código']:
+                        if cand in df_est_prod.columns:
+                            col_codigo_est = cand
+                            break
 
-                    df_merge_prod = pd.merge(
-                        df_vendas[['codigo', 'quantidade']],
-                        df_est_prod,
-                        on='codigo',
-                        how='left'
-                    )
+                    if col_codigo_est is not None and 'estoque_atual' in df_est_prod.columns:
+                        df_est_prod = df_est_prod[[col_codigo_est, 'nome', 'estoque_atual']].copy()
+                        df_est_prod.rename(columns={col_codigo_est: 'codigo'}, inplace=True)
+                        df_est_prod['estoque_atual'] = pd.to_numeric(df_est_prod['estoque_atual'], errors='coerce').fillna(0)
 
-                    df_merge_prod['estoque_atual'] = df_merge_prod['estoque_atual'].fillna(0)
-                    df_merge_prod['faltante_produto'] = (df_merge_prod['quantidade'] - df_merge_prod['estoque_atual']).clip(lower=0)
+                        df_merge_prod = pd.merge(
+                            df_vendas[['codigo', 'quantidade']],
+                            df_est_prod,
+                            on='codigo',
+                            how='left'
+                        )
 
-                    st.subheader("📦 Situação dos Produtos Prontos (template_estoque)")
-                    st.dataframe(
-                        df_merge_prod[['codigo', 'nome', 'quantidade', 'estoque_atual', 'faltante_produto']],
-                        use_container_width=True
-                    )
+                        df_merge_prod['estoque_atual'] = df_merge_prod['estoque_atual'].fillna(0)
+                        df_merge_prod['faltante_produto'] = (df_merge_prod['quantidade'] - df_merge_prod['estoque_atual']).clip(lower=0)
 
-                    df_para_produzir = df_merge_prod[df_merge_prod['faltante_produto'] > 0].copy()
-                    df_para_produzir = df_para_produzir[['codigo', 'faltante_produto']].rename(columns={'faltante_produto': 'quantidade'})
+                        st.subheader("📦 Situação dos Produtos Prontos (template_estoque)")
+                        st.dataframe(
+                            df_merge_prod[['codigo', 'nome', 'quantidade', 'estoque_atual', 'faltante_produto']],
+                            use_container_width=True
+                        )
 
-                    if df_para_produzir.empty:
-                        st.success("✅ Todos os produtos vendidos têm estoque suficiente na `template_estoque`. Nada a produzir hoje.")
-                        # Mesmo assim, mantemos a lógica antiga se você quiser só explodir as vendas:
+                        df_para_produzir = df_merge_prod[df_merge_prod['faltante_produto'] > 0].copy()
+                        df_para_produzir = df_para_produzir[['codigo', 'faltante_produto']].rename(columns={'faltante_produto': 'quantidade'})
+
+                        if df_para_produzir.empty:
+                            st.success("✅ Todos os produtos vendidos têm estoque suficiente na `template_estoque`. Nada a produzir hoje.")
+                            df_merge_mae = pd.merge(df_vendas[['codigo', 'quantidade']], df_mae, on='codigo', how='left')
+                            codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
+                            dados_validos_df = df_merge_mae.dropna(subset=['semi'])
+                        else:
+                            st.info(f"⚙️ {len(df_para_produzir)} código(s) com falta de produto pronto. Apenas esses serão explodidos em insumos.")
+                            df_merge_mae = pd.merge(df_para_produzir, df_mae, on='codigo', how='left')
+                            codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
+                            dados_validos_df = df_merge_mae.dropna(subset=['semi'])
+                    else:
+                        st.warning("⚠️ Não encontrei colunas 'codigo'/'código' + 'estoque_atual' em template_estoque. "
+                                   "Voltando para modo simples (explode todas as vendas).")
                         df_merge_mae = pd.merge(df_vendas[['codigo', 'quantidade']], df_mae, on='codigo', how='left')
                         codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
                         dados_validos_df = df_merge_mae.dropna(subset=['semi'])
-
-                    else:
-                        st.info(f"⚙️ {len(df_para_produzir)} código(s) com falta de produto pronto. Apenas esses serão explodidos em insumos.")
-                        # Agora casamos df_para_produzir com a Planilha Mãe
-                        df_merge_mae = pd.merge(df_para_produzir, df_mae, on='codigo', how='left')
-                        codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
-                        dados_validos_df = df_merge_mae.dropna(subset=['semi'])
-
                 else:
                     # Sem estoque online → comportamento antigo (explode tudo que vendeu)
                     df_merge_mae = pd.merge(df_vendas[['codigo', 'quantidade']], df_mae, on='codigo', how='left')

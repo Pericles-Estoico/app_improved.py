@@ -1,44 +1,86 @@
-# app_improved.py
 import streamlit as st
 import pandas as pd
-from io import BytesIO, StringIO
+import numpy as np
+from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Border, Side
-import numpy as np
 import requests
 
 # ==============================================================================
-# CONFIGURAÇÕES E ESTILOS
+# CONFIGURAÇÃO GERAL DO APP
 # ==============================================================================
 
-st.set_page_config(page_title="Pure & Posh Baby - Sistema de Relatórios", page_icon="👑", layout="wide")
-
-# 🔗 URL DA PLANILHA DE ESTOQUE (template_estoque) – APENAS LEITURA
-# Agora usando export?format=csv&gid=1456159896 (mesmo gid do link que você mandou)
-TEMPLATE_ESTOQUE_URL = (
-    "https://docs.google.com/spreadsheets/d/"
-    "1PpiMQingHf4llA03BiPIuPJPIZqul4grRU_emWDEK1o"
-    "/export?format=csv&gid=1456159896"
+st.set_page_config(
+    page_title="Pure & Posh Baby - Relatórios & Produção",
+    page_icon="👑",
+    layout="wide"
 )
 
-# Header visual
-st.markdown("""
-<style>
-.centered-title { text-align: center; width: 100%; margin: 0 auto; }
-@media (max-width: 768px) { .centered-title { text-align: center; } }
-</style>
-""", unsafe_allow_html=True)
+# ------------------------------------------------------------------------------
+# CSS básico
+# ------------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    .centered-title { text-align: center; width: 100%; margin: 0 auto; }
+    .explicacao-box {
+        background-color: #f8f9fa;
+        border-left: 4px solid #0d6efd;
+        padding: 0.8rem 1rem;
+        border-radius: 6px;
+        margin-bottom: 0.8rem;
+        font-size: 0.9rem;
+    }
+    .alerta-box {
+        background-color: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 0.8rem 1rem;
+        border-radius: 6px;
+        margin-bottom: 0.8rem;
+        font-size: 0.9rem;
+    }
+    .sucesso-box {
+        background-color: #d4edda;
+        border-left: 4px solid #28a745;
+        padding: 0.8rem 1rem;
+        border-radius: 6px;
+        margin-bottom: 0.8rem;
+        font-size: 0.9rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
+# ------------------------------------------------------------------------------
+# Header
+# ------------------------------------------------------------------------------
 st.markdown('<div class="centered-title">', unsafe_allow_html=True)
-st.title("👑 Sistema de Relatórios de Vendas v4.1")
-st.markdown("**Pure & Posh Baby**")
+st.title("👑 Sistema de Relatórios & Planejamento de Produção")
+st.markdown("**Pure & Posh Baby** — Vendas → Estoque → Produção")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Session state inicial
-if 'planilha_mae_carregada' not in st.session_state:
-    st.session_state['planilha_mae_carregada'] = False
-if 'df_mae' not in st.session_state:
-    st.session_state['df_mae'] = None
+
+# ==============================================================================
+# SESSION STATE
+# ==============================================================================
+if "planilha_mae_carregada" not in st.session_state:
+    st.session_state["planilha_mae_carregada"] = False
+if "df_mae" not in st.session_state:
+    st.session_state["df_mae"] = None
+
+
+# ==============================================================================
+# CONFIG: TEMPLATE_ESTOQUE (Google Sheets - somente leitura)
+# ==============================================================================
+
+# ❗ Ajuste este URL se a planilha mudar.
+# É o mesmo ID do cockpit (template_estoque).
+TEMPLATE_ESTOQUE_CSV_URL = (
+    "https://docs.google.com/spreadsheets/d/1PpiMQingHf4llA03BiPIuPJPIZqul4grRU_emWDEK1o/"
+    "export?format=csv"
+)
+
 
 # ==============================================================================
 # FUNÇÕES CORE
@@ -46,163 +88,178 @@ if 'df_mae' not in st.session_state:
 
 @st.cache_data
 def load_excel(arquivo):
-    """Carrega um arquivo Excel em um DataFrame, com cache para performance."""
+    """Carrega um arquivo Excel em um DataFrame, com cache."""
     return pd.read_excel(arquivo)
 
+
 @st.cache_data(ttl=60)
-def carregar_template_estoque_raw():
+def carregar_template_estoque():
     """
-    Lê a aba 'template_estoque' via gid, apenas leitura.
+    Lê a planilha template_estoque em modo SOMENTE LEITURA.
+    Espera colunas:
+      - codigo
+      - nome
+      - categoria (ex: Produto, Semi, Gola, Bordado)
+      - estoque_atual
+    Se tiver mais colunas, elas são ignoradas.
     """
     try:
-        r = requests.get(TEMPLATE_ESTOQUE_URL, timeout=15)
+        r = requests.get(TEMPLATE_ESTOQUE_CSV_URL, timeout=20)
         r.raise_for_status()
-        df = pd.read_csv(StringIO(r.text))
-        if df.empty:
-            return None
-        # normaliza colunas
+        df = pd.read_csv(BytesIO(r.content), encoding="utf-8")
+
         df.columns = df.columns.str.strip().str.lower()
+        # Garante colunas mínimas
+        if "codigo" not in df.columns:
+            df["codigo"] = ""
+        if "nome" not in df.columns:
+            df["nome"] = ""
+        if "categoria" not in df.columns:
+            df["categoria"] = "Produto"
+        if "estoque_atual" not in df.columns:
+            df["estoque_atual"] = 0
+
+        df["estoque_atual"] = pd.to_numeric(df["estoque_atual"], errors="coerce").fillna(0)
+
+        # Normalizações para matching por nome
+        df["nome_norm"] = df["nome"].astype(str).str.strip().str.lower()
+        df["categoria_norm"] = df["categoria"].astype(str).str.strip().str.lower()
+
         return df
     except Exception as e:
-        st.warning(f"⚠️ Erro ao ler template_estoque: {e}")
-        return None
+        st.warning(f"⚠️ Não foi possível ler a template_estoque: {e}")
+        return pd.DataFrame()
+
 
 def get_categoria_ordem(semi):
     """
-    Determina a categoria e a ordem de um item 'semi' para ordenação nos relatórios.
-    
+    Determina:
+      - categoria (1 a 4, para ordenação)
+      - cor_ordem
+      - tamanho_ordem
+    com base no texto do 'semi'.
     ORDEM:
-      1 = Manga Longa
-      2 = Manga Curta Menina
-      3 = Manga Curta Menino
-      4 = Mijão
-      5 = Outros
-    
-    Dentro de cada categoria:
-      Cor: Branco, Off, Rosa, Azul, Vermelho, Marinho, Outras
-      Tamanho: RN, P, M, G, 1, 2, 3, 4, Outros
+        1) Manga Longa
+        2) Manga Curta Menina
+        3) Manga Curta Menino
+        4) Mijão
     """
     semi_str = str(semi).lower()
-    
-    # Categoria
-    if 'manga longa' in semi_str:
+
+    # Categoria de produto
+    if "manga longa" in semi_str:
         categoria = 1
-    elif 'manga curta' in semi_str and 'menina' in semi_str:
+    elif "manga curta" in semi_str and "menina" in semi_str:
         categoria = 2
-    elif 'manga curta' in semi_str and 'menino' in semi_str:
+    elif "manga curta" in semi_str and "menino" in semi_str:
         categoria = 3
-    elif 'mijão' in semi_str or 'mijao' in semi_str:
+    elif "mijão" in semi_str or "mijao" in semi_str:
         categoria = 4
     else:
         categoria = 5
-    
-    # Cor
-    if 'branco' in semi_str:
+
+    # Ordem de cores
+    if "branco" in semi_str:
         cor_ordem = 1
-    elif 'off-white' in semi_str or 'off white' in semi_str:
+    elif "off-white" in semi_str or "off white" in semi_str:
         cor_ordem = 2
-    elif 'rosa' in semi_str:
+    elif "rosa" in semi_str:
         cor_ordem = 3
-    elif 'azul' in semi_str:
+    elif "azul" in semi_str:
         cor_ordem = 4
-    elif 'vermelho' in semi_str:
+    elif "vermelho" in semi_str:
         cor_ordem = 5
-    elif 'marinho' in semi_str:
+    elif "marinho" in semi_str:
         cor_ordem = 6
     else:
         cor_ordem = 7
-    
-    # Tamanho
-    if '-rn' in semi_str or ' rn' in semi_str:
+
+    # Tamanhos
+    if "-rn" in semi_str or " rn" in semi_str:
         tamanho_ordem = 1
-    elif '-p' in semi_str or ' p' in semi_str:
+    elif "-p" in semi_str or " p" in semi_str:
         tamanho_ordem = 2
-    elif '-m' in semi_str or ' m' in semi_str:
+    elif "-m" in semi_str or " m" in semi_str:
         tamanho_ordem = 3
-    elif '-g' in semi_str or ' g' in semi_str:
+    elif "-g" in semi_str or " g" in semi_str:
         tamanho_ordem = 4
-    elif '-1' in semi_str or ' 1' in semi_str:
-        tamanho_ordem = 5
-    elif '-2' in semi_str or ' 2' in semi_str:
-        tamanho_ordem = 6
-    elif '-3' in semi_str or ' 3' in semi_str:
-        tamanho_ordem = 7
-    elif '-4' in semi_str or ' 4' in semi_str:
-        tamanho_ordem = 8
     else:
-        tamanho_ordem = 9
-    
+        tamanho_ordem = 5
+
     return categoria, cor_ordem, tamanho_ordem
+
 
 def explodir_kits(df_vendas_com_mae, df_mae_completa):
     """
-    Explode kits + produtos em componentes individuais (Semi / Gola / Bordado),
-    multiplicando pela quantidade NECESSÁRIA (faltante de produto pronto).
+    Função principal para "explodir" kits em seus componentes individuais
+    (Semi / Gola / Bordado), reaproveitando a estrutura original.
+
+    - df_vendas_com_mae: já mesclado com a planilha mãe.
+    - df_mae_completa: planilha mãe completa (códigos → semi/gola/bordado/componentes_codigos).
+
+    Retorna DataFrame com colunas:
+      semi, gola, bordado, quantidade
     """
     componentes_finais = []
-    
-    # Índice por código para acesso rápido
-    df_mae_completa = df_mae_completa.set_index('codigo')
+
+    df_mae_completa = df_mae_completa.set_index("codigo")
 
     def obter_componentes(codigo, quantidade):
-        """Recursivo: encontra todos os componentes (semi/gola/bordado + filhos) de um código."""
         lista_componentes_recursiva = []
-        
+
         try:
             produto = df_mae_completa.loc[codigo]
         except KeyError:
-            # Código não existe na planilha mãe
             return []
 
-        # 1. Componentes diretos (semi/gola/bordado)
+        # 1. Componente direto (semi/gola/bordado)
         semi_valido = False
-        if 'semi' in produto.index and pd.notna(produto['semi']):
-            if isinstance(produto['semi'], str) and produto['semi'].strip() != '':
+        if "semi" in produto.index and pd.notna(produto["semi"]):
+            if isinstance(produto["semi"], str) and produto["semi"].strip() != "":
                 semi_valido = True
 
         if semi_valido:
-            lista_componentes_recursiva.append({
-                'semi': produto['semi'],
-                'gola': produto['gola'] if ('gola' in produto.index and pd.notna(produto['gola'])) else '',
-                'bordado': produto['bordado'] if ('bordado' in produto.index and pd.notna(produto['bordado'])) else '',
-                'quantidade': quantidade
-            })
+            lista_componentes_recursiva.append(
+                {
+                    "semi": produto["semi"],
+                    "gola": produto["gola"] if pd.notna(produto.get("gola", "")) else "",
+                    "bordado": produto["bordado"] if pd.notna(produto.get("bordado", "")) else "",
+                    "quantidade": quantidade,
+                }
+            )
 
-        # 2. Kits (componentes_codigos)
-        if 'componentes_codigos' in produto.index and pd.notna(produto['componentes_codigos']):
-            componentes_str = str(produto['componentes_codigos']).strip()
-            if componentes_str != '' and componentes_str.lower() != 'nan':
-                codigos_aninhados = componentes_str.split(';')
-                for cod_aninhado in codigos_aninhados:
-                    cod_aninhado = cod_aninhado.strip()
-                    if cod_aninhado:
-                        lista_componentes_recursiva.extend(obter_componentes(cod_aninhado, quantidade))
-        
+        # 2. Componentes aninhados (kits)
+        componentes_codigos_valido = False
+        if "componentes_codigos" in produto.index and pd.notna(produto["componentes_codigos"]):
+            comp_str = str(produto["componentes_codigos"]).strip()
+            if comp_str != "" and comp_str.lower() != "nan":
+                componentes_codigos_valido = True
+
+        if componentes_codigos_valido:
+            codigos_aninhados = str(produto["componentes_codigos"]).split(";")
+            for cod_aninhado in codigos_aninhados:
+                cod_aninhado = cod_aninhado.strip()
+                if cod_aninhado:
+                    lista_componentes_recursiva.extend(obter_componentes(cod_aninhado, quantidade))
+
         return lista_componentes_recursiva
 
     for _, venda in df_vendas_com_mae.iterrows():
-        # venda['quantidade'] aqui já é a quantidade FALTANTE de produto pronto
-        componentes_finais.extend(obter_componentes(venda['codigo'], venda['quantidade']))
+        componentes_finais.extend(obter_componentes(venda["codigo"], venda["quantidade"]))
 
     return pd.DataFrame(componentes_finais)
 
-def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
+
+def gerar_excel_formatado(df, nome_aba, agrupar_por_semi=False):
     """
     Gera um arquivo Excel formatado a partir de um DataFrame.
-
-    Se agrupar_por_semi=True:
-      - Agrupa por (semi, gola, bordado)
-      - Ordena por categoria/cor/tamanho
-      - Cria blocos:
-          SEMI (linha pai)
-            - golas necessárias abaixo
-            - se não houver gola -> bordado abaixo
+    Usado para todos os relatórios baixados.
     """
     output = BytesIO()
     wb = Workbook()
     ws = wb.active
-    ws.title = "Relatório"
-    
+    ws.title = nome_aba
+
     # Estilos
     header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True)
@@ -211,84 +268,81 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
     manga_curta_menino_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     mijao_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
     semi_font = Font(bold=True)
-    border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                    top=Side(style='thin'), bottom=Side(style='thin'))
-    
+    border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
     if agrupar_por_semi:
-        # Cabeçalho
-        headers = ['Item', 'Quantidade', 'Check']
+        # Layout hierárquico Semi → Golas/Bordados
+        headers = ["Item", "Quantidade", "Check"]
         for col_num, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col_num, value=header)
             cell.fill = header_fill
             cell.font = header_font
             cell.border = border
-        
-        # Limpar nulos
-        df = df.copy()
-        df['gola'] = df['gola'].fillna('')
-        df['bordado'] = df['bordado'].fillna('')
-        
-        # Agrupa por semi + gola + bordado
-        relatorio_componentes = df.groupby(['semi', 'gola', 'bordado'])['quantidade'].sum().reset_index()
-        
-        # Ordenação
-        relatorio_componentes[['categoria', 'cor_ordem', 'tamanho_ordem']] = relatorio_componentes['semi'].apply(
-            lambda x: pd.Series(get_categoria_ordem(x))
-        )
-        relatorio_componentes = relatorio_componentes.sort_values(
-            ['categoria', 'cor_ordem', 'tamanho_ordem', 'semi', 'gola', 'bordado']
-        )
-        
-        # Estrutura hierárquica
-        relatorio_hierarquico = []
-        for semi_produto, grupo in relatorio_componentes.groupby('semi'):
-            total_semi = grupo['quantidade'].sum()
-            categoria = grupo['categoria'].iloc[0]
-            
-            # Linha SEMI
-            relatorio_hierarquico.append({
-                'Item': semi_produto,
-                'Quantidade': total_semi,
-                'Check': '',
-                'categoria': categoria,
-                'is_semi': True
-            })
-            
-            # Linhas de componentes (golas/bordados)
-            for _, row in grupo.iterrows():
-                if row['gola'] and str(row['gola']).strip() != '':
-                    componente = f"{row['gola']}"
-                elif row['bordado'] and str(row['bordado']).strip() != '':
-                    componente = f"{row['bordado']}"
-                else:
-                    continue
-                
-                relatorio_hierarquico.append({
-                    'Item': f"  {componente}",
-                    'Quantidade': row['quantidade'],
-                    'Check': '',
-                    'categoria': categoria,
-                    'is_semi': False
-                })
 
-        # Escreve
+        df["gola"] = df["gola"].fillna("")
+        df["bordado"] = df["bordado"].fillna("")
+
+        # Agrupa semi + gola/bordado
+        relatorio_componentes = df.groupby(["semi", "gola", "bordado"])["quantidade"].sum().reset_index()
+
+        relatorio_componentes[["categoria", "cor_ordem", "tamanho_ordem"]] = relatorio_componentes[
+            "semi"
+        ].apply(lambda x: pd.Series(get_categoria_ordem(x)))
+
+        relatorio_componentes = relatorio_componentes.sort_values(
+            ["categoria", "cor_ordem", "tamanho_ordem", "semi", "gola", "bordado"]
+        )
+
+        relatorio_hierarquico = []
+        for semi_produto, grupo in relatorio_componentes.groupby("semi"):
+            total_semi = grupo["quantidade"].sum()
+            categoria = grupo["categoria"].iloc[0]
+
+            relatorio_hierarquico.append(
+                {
+                    "Item": semi_produto,
+                    "Quantidade": total_semi,
+                    "Check": "",
+                    "categoria": categoria,
+                    "is_semi": True,
+                }
+            )
+
+            for _, row in grupo.iterrows():
+                componentes_txt = f"{row['gola']} {row['bordado']}".strip()
+                if componentes_txt:
+                    relatorio_hierarquico.append(
+                        {
+                            "Item": f"  {componentes_txt}",
+                            "Quantidade": row["quantidade"],
+                            "Check": "",
+                            "categoria": categoria,
+                            "is_semi": False,
+                        }
+                    )
+
         row_num = 2
         for item in relatorio_hierarquico:
-            is_semi = item['is_semi']
-            categoria = item['categoria']
-            
+            is_semi = item["is_semi"]
+            categoria = item["categoria"]
+
             fill_color = None
             if is_semi:
-                if categoria == 1: 
+                if categoria == 1:
                     fill_color = manga_longa_fill
-                elif categoria == 2: 
+                elif categoria == 2:
                     fill_color = manga_curta_menina_fill
-                elif categoria == 3: 
+                elif categoria == 3:
                     fill_color = manga_curta_menino_fill
-                elif categoria == 4: 
+                elif categoria == 4:
                     fill_color = mijao_fill
-            
-            for col_num, key in enumerate(['Item', 'Quantidade', 'Check'], 1):
+
+            for col_num, key in enumerate(["Item", "Quantidade", "Check"], 1):
                 cell = ws.cell(row=row_num, column=col_num, value=item[key])
                 cell.border = border
                 if is_semi:
@@ -297,11 +351,11 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
                     if fill_color:
                         cell.fill = fill_color
             row_num += 1
-        
-        ws.column_dimensions['A'].width = 60
-        ws.column_dimensions['B'].width = 12
-        ws.column_dimensions['C'].width = 8
-        
+
+        ws.column_dimensions["A"].width = 60
+        ws.column_dimensions["B"].width = 12
+        ws.column_dimensions["C"].width = 8
+
     else:
         headers = list(df.columns)
         for col_num, header in enumerate(headers, 1):
@@ -309,453 +363,572 @@ def gerar_excel_formatado(df, nome_arquivo, agrupar_por_semi=False):
             cell.fill = header_fill
             cell.font = header_font
             cell.border = border
-        
+
         for r_idx, row in enumerate(df.itertuples(index=False), 2):
             for c_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=r_idx, column=c_idx, value=value)
                 cell.border = border
-        
-        # Autoajuste
+
+        # Ajuste de largura
         for column in ws.columns:
             max_length = 0
             column_letter = column[0].column_letter
             for cell in column:
                 try:
-                    if cell.value is not None and len(str(cell.value)) > max_length:
+                    if len(str(cell.value)) > max_length:
                         max_length = len(str(cell.value))
-                except:
+                except Exception:
                     pass
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column_letter].width = adjusted_width
-    
+
     wb.save(output)
     output.seek(0)
     return output
 
-def cruzar_com_estoque_insumos(dados_explodidos, df_estoque_raw):
-    """
-    Cruzamento com a planilha template_estoque para insumos:
-      - Semis
-      - Golas
-      - Bordados (apenas quando não há gola)
-    """
-    if df_estoque_raw is None or df_estoque_raw.empty:
-        return None, None, None
-
-    df_est = df_estoque_raw.copy()
-    df_est.columns = df_est.columns.str.strip().str.lower()
-    if 'nome' not in df_est.columns or 'estoque_atual' not in df_est.columns:
-        return None, None, None
-
-    df_est['item'] = df_est['nome'].astype(str).str.strip().str.lower()
-    df_est['estoque_atual'] = pd.to_numeric(df_est['estoque_atual'], errors='coerce').fillna(0)
-
-    # --- SEMIS ---
-    semis = dados_explodidos.copy()
-    semis = semis.groupby('semi', as_index=False)['quantidade'].sum()
-    semis = semis[semis['semi'].notna() & (semis['semi'].astype(str).str.strip() != '')]
-    semis['semi_key'] = semis['semi'].astype(str).str.strip().str.lower()
-    semis[['categoria', 'cor_ordem', 'tamanho_ordem']] = semis['semi'].apply(
-        lambda x: pd.Series(get_categoria_ordem(x))
-    )
-
-    semis = semis.merge(
-        df_est[['item', 'estoque_atual']],
-        how='left',
-        left_on='semi_key',
-        right_on='item'
-    )
-    semis['estoque_atual'] = semis['estoque_atual'].fillna(0)
-    semis['falta'] = (semis['quantidade'] - semis['estoque_atual']).clip(lower=0)
-    semis_falta = semis[semis['falta'] > 0].copy()
-    semis_falta = semis_falta.sort_values(['categoria', 'cor_ordem', 'tamanho_ordem', 'semi'])
-
-    semis_falta = semis_falta[['semi', 'quantidade', 'estoque_atual', 'falta']]
-    semis_falta.columns = ['Semi', 'Qtd Necessária', 'Estoque Atual', 'Falta']
-
-    # --- GOLAS ---
-    golas = dados_explodidos.copy()
-    golas = golas[golas['gola'].notna() & (golas['gola'].astype(str).str.strip() != '')]
-    if not golas.empty:
-        golas = golas.groupby('gola', as_index=False)['quantidade'].sum()
-        golas['gola_key'] = golas['gola'].astype(str).str.strip().str.lower()
-
-        golas = golas.merge(
-            df_est[['item', 'estoque_atual']],
-            how='left',
-            left_on='gola_key',
-            right_on='item'
-        )
-        golas['estoque_atual'] = golas['estoque_atual'].fillna(0)
-        golas['falta'] = (golas['quantidade'] - golas['estoque_atual']).clip(lower=0)
-        golas_falta = golas[golas['falta'] > 0].copy()
-        golas_falta = golas_falta.sort_values(['gola'])
-
-        golas_falta = golas_falta[['gola', 'quantidade', 'estoque_atual', 'falta']]
-        golas_falta.columns = ['Gola', 'Qtd Necessária', 'Estoque Atual', 'Falta']
-    else:
-        golas_falta = pd.DataFrame(columns=['Gola', 'Qtd Necessária', 'Estoque Atual', 'Falta'])
-
-    # --- BORDADOS (sem gola) ---
-    bords = dados_explodidos.copy()
-    bords = bords[
-        (bords['gola'].isna() | (bords['gola'].astype(str).str.strip() == '')) &
-        (bords['bordado'].notna()) &
-        (bords['bordado'].astype(str).str.strip() != '')
-    ]
-    if not bords.empty:
-        bords = bords.groupby('bordado', as_index=False)['quantidade'].sum()
-        bords['bordado_key'] = bords['bordado'].astype(str).str.strip().str.lower()
-
-        bords = bords.merge(
-            df_est[['item', 'estoque_atual']],
-            how='left',
-            left_on='bordado_key',
-            right_on='item'
-        )
-        bords['estoque_atual'] = bords['estoque_atual'].fillna(0)
-        bords['falta'] = (bords['quantidade'] - bords['estoque_atual']).clip(lower=0)
-        bords_falta = bords[bords['falta'] > 0].copy()
-        bords_falta = bords_falta.sort_values(['bordado'])
-
-        bords_falta = bords_falta[['bordado', 'quantidade', 'estoque_atual', 'falta']]
-        bords_falta.columns = ['Bordado', 'Qtd Necessária', 'Estoque Atual', 'Falta']
-    else:
-        bords_falta = pd.DataFrame(columns=['Bordado', 'Qtd Necessária', 'Estoque Atual', 'Falta'])
-
-    return semis_falta, golas_falta, bords_falta
 
 # ==============================================================================
-# INTERFACE DO STREAMLIT
+# 1) CARREGAMENTO DA PLANILHA MÃE
 # ==============================================================================
 
-st.header("📁 Configuração Inicial")
+st.header("📁 1. Configuração Inicial — Planilha Mãe")
+
+st.markdown(
+    """
+<div class="explicacao-box">
+<b>O que é a Planilha Mãe?</b><br>
+Ela define a “receita” de cada produto:<br>
+• <code>codigo</code> → código de venda<br>
+• <code>semi</code> → qual semi esse produto usa<br>
+• <code>gola</code> → qual gola esse produto usa<br>
+• <code>bordado</code> → qual bordado a gola usa<br>
+• <code>componentes_codigos</code> (opcional) → códigos extras que compõem kits<br><br>
+Você só precisa carregar essa planilha uma vez por sessão.
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
 
 def carregar_planilha_mae(arquivo):
-    """Carrega e valida a Planilha Mãe."""
+    """Carrega e valida a planilha mãe, atualizando o session_state."""
     try:
         with st.spinner("Carregando e validando Planilha Mãe..."):
             df = load_excel(arquivo)
             df.columns = df.columns.str.strip().str.replace(" ", "_").str.lower()
-            
-            colunas_essenciais = ['codigo', 'semi', 'gola', 'bordado']
+
+            colunas_essenciais = ["codigo", "semi", "gola", "bordado"]
             if not all(col in df.columns for col in colunas_essenciais):
-                st.error(f"❌ Erro: A Planilha Mãe deve conter as colunas: {', '.join(colunas_essenciais)}.")
-                return False
+                st.error(
+                    "❌ A Planilha Mãe deve conter as colunas: "
+                    + ", ".join(colunas_essenciais)
+                )
+                return
 
-            if 'componentes_codigos' not in df.columns:
-                df['componentes_codigos'] = ''
+            if "componentes_codigos" not in df.columns:
+                df["componentes_codigos"] = ""
 
-            st.session_state['df_mae'] = df
-            st.session_state['planilha_mae_carregada'] = True
+            st.session_state["df_mae"] = df
+            st.session_state["planilha_mae_carregada"] = True
             st.success(f"✅ Planilha Mãe carregada: {len(df)} produtos cadastrados.")
             st.rerun()
     except Exception as e:
         st.error(f"Erro ao carregar planilha mãe: {str(e)}")
 
-# Upload da Planilha Mãe
-if st.session_state['planilha_mae_carregada']:
-    st.success(f"✅ Planilha Mãe carregada: {len(st.session_state['df_mae'])} produtos cadastrados.")
-    with st.expander("🔄 Recarregar/Atualizar Planilha Mãe"):
-        uploaded_mae_nova = st.file_uploader("Substitua a Planilha Mãe atual", type=["xlsx"], key="planilha_mae_nova")
+
+if st.session_state["planilha_mae_carregada"]:
+    st.success(
+        f"✅ Planilha Mãe carregada: {len(st.session_state['df_mae'])} produtos cadastrados."
+    )
+    with st.expander("🔄 Recarregar / Atualizar Planilha Mãe"):
+        uploaded_mae_nova = st.file_uploader(
+            "Substituir Planilha Mãe atual", type=["xlsx"], key="planilha_mae_nova"
+        )
         if uploaded_mae_nova:
             carregar_planilha_mae(uploaded_mae_nova)
 else:
-    st.info("📋 Para começar, carregue a Planilha Mãe.\n\nEla deve conter as colunas: `codigo`, `semi`, `gola`, `bordado` e, opcionalmente, `componentes_codigos` para kits.")
-    uploaded_mae = st.file_uploader("Carregar Planilha Mãe", type=["xlsx"], key="planilha_mae")
+    st.info(
+        "📋 Para começar, carregue a Planilha Mãe (`codigo`, `semi`, `gola`, `bordado`, `componentes_codigos`)."
+    )
+    uploaded_mae = st.file_uploader(
+        "Carregar Planilha Mãe", type=["xlsx"], key="planilha_mae"
+    )
     if uploaded_mae:
         carregar_planilha_mae(uploaded_mae)
 
-# Carrega estoque online (produtos prontos + insumos)
-df_estoque_raw = carregar_template_estoque_raw()
-if df_estoque_raw is None:
-    st.warning("⚠️ Não foi possível carregar a aba `template_estoque`. "
-               "A lógica de falta de produto pronto será ignorada e o app trabalhará somente com as vendas.")
-else:
-    st.success(f"📦 Estoque (`template_estoque`) carregado ({len(df_estoque_raw)} linhas).")
 
-# --- Processamento de Vendas ---
-if st.session_state['planilha_mae_carregada']:
-    st.header("📊 Processamento Diário de Vendas")
-    
-    st.markdown("""
-    **Formato esperado da planilha de Vendas (diária)**  
-    - Arquivo: `.xlsx`  
-    - Colunas mínimas:
-        - `código` (ou `codigo`)
-        - `quantidade`
-    """)
+# ==============================================================================
+# 2) PROCESSAMENTO DE VENDAS + ESTOQUE TEMPLATE
+# ==============================================================================
 
-    uploaded_vendas = st.file_uploader("📈 Planilha de Vendas (diária)", type=["xlsx"], key="vendas")
-    
+if st.session_state["planilha_mae_carregada"]:
+    st.header("📊 2. Processar Vendas do Dia")
+
+    st.markdown(
+        """
+<div class="explicacao-box">
+<b>Como deve ser a planilha de vendas?</b><br>
+• Formato: Excel (<code>.xlsx</code>)<br>
+• Colunas obrigatórias: <code>código</code> e <code>quantidade</code><br>
+• Uma linha por venda / produto.<br><br>
+O app vai:<br>
+1) Somar as quantidades vendidas por código;<br>
+2) Consultar o estoque de produtos prontos na <b>template_estoque</b> (modo leitura);<br>
+3) Usar o que já tem pronto em estoque;<br>
+4) Só explodir em insumos o que <b>realmente falta produzir</b>.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    uploaded_vendas = st.file_uploader(
+        "📈 Planilha de Vendas (diária)", type=["xlsx"], key="vendas"
+    )
+
     if uploaded_vendas:
+        df_mae = st.session_state["df_mae"]
+
         try:
-            with st.spinner("Processando vendas..."):
+            with st.spinner("Carregando vendas..."):
                 df_vendas = load_excel(uploaded_vendas)
-                df_vendas.columns = df_vendas.columns.str.strip().str.replace(' ', '_').str.lower()
+                df_vendas.columns = (
+                    df_vendas.columns.str.strip().str.replace(" ", "_").str.lower()
+                )
 
-                if 'código' not in df_vendas.columns and 'codigo' not in df_vendas.columns:
-                    st.error("❌ Planilha de vendas deve ter coluna 'código' ou 'codigo'.")
+                if "código" not in df_vendas.columns or "quantidade" not in df_vendas.columns:
+                    st.error("❌ A planilha de vendas deve ter as colunas 'código' e 'quantidade'.")
                     st.stop()
-                if 'quantidade' not in df_vendas.columns:
-                    st.error("❌ Planilha de vendas deve ter coluna 'quantidade'.")
-                    st.stop()
 
-                if 'código' in df_vendas.columns:
-                    df_vendas = df_vendas.rename(columns={'código': 'codigo'})
-                
-                df_vendas['quantidade'] = pd.to_numeric(df_vendas['quantidade'], errors='coerce').fillna(0).astype(int)
-                df_vendas = df_vendas[df_vendas['quantidade'] > 0]
+                df_vendas = df_vendas.rename(columns={"código": "codigo"})
+                df_vendas["quantidade"] = pd.to_numeric(
+                    df_vendas["quantidade"], errors="coerce"
+                ).fillna(0).astype(int)
 
-                df_mae = st.session_state['df_mae']
+                # Agrupa por código (total vendido no período)
+                df_vendas_agr = (
+                    df_vendas.groupby("codigo", as_index=False)["quantidade"].sum()
+                )
 
-                # ------------------------------------------------------------------
-                # 1) VERIFICA ESTOQUE DE PRODUTO PRONTO (template_estoque)
-                # ------------------------------------------------------------------
-                if df_estoque_raw is not None:
-                    df_est_prod = df_estoque_raw.copy()
-                    # tenta achar coluna de código
-                    col_codigo_est = None
-                    for cand in ['codigo', 'código']:
-                        if cand in df_est_prod.columns:
-                            col_codigo_est = cand
-                            break
+            # ------------------------------------------------------------------
+            # 2.1 Ler template_estoque e cruzar com produtos prontos
+            # ------------------------------------------------------------------
+            st.subheader("📦 Situação dos Produtos Prontos (template_estoque)")
 
-                    if col_codigo_est is not None and 'estoque_atual' in df_est_prod.columns:
-                        df_est_prod = df_est_prod[[col_codigo_est, 'nome', 'estoque_atual']].copy()
-                        df_est_prod.rename(columns={col_codigo_est: 'codigo'}, inplace=True)
-                        df_est_prod['estoque_atual'] = pd.to_numeric(df_est_prod['estoque_atual'], errors='coerce').fillna(0)
+            df_estoque = carregar_template_estoque()
+            if df_estoque.empty:
+                st.warning(
+                    "⚠️ Não foi possível carregar a template_estoque. "
+                    "O app vai considerar que não há produto pronto em estoque."
+                )
+                df_estoque_produtos = pd.DataFrame(
+                    columns=["codigo", "nome", "estoque_atual"]
+                )
+            else:
+                # Considera tudo como "produto pronto" para esse nível
+                df_estoque_produtos = df_estoque[["codigo", "nome", "estoque_atual"]].copy()
 
-                        df_merge_prod = pd.merge(
-                            df_vendas[['codigo', 'quantidade']],
-                            df_est_prod,
-                            on='codigo',
-                            how='left'
+            df_merge_prod = df_vendas_agr.merge(
+                df_estoque_produtos, on="codigo", how="left"
+            )
+            df_merge_prod["estoque_atual"] = df_merge_prod["estoque_atual"].fillna(0)
+
+            df_merge_prod["usando_estoque_pronto"] = df_merge_prod[
+                ["quantidade", "estoque_atual"]
+            ].min(axis=1)
+            df_merge_prod["faltante_produto"] = (
+                df_merge_prod["quantidade"] - df_merge_prod["estoque_atual"]
+            )
+            df_merge_prod["faltante_produto"] = df_merge_prod["faltante_produto"].clip(
+                lower=0
+            )
+
+            st.markdown(
+                """
+<div class="explicacao-box">
+<b>O que você está vendo aqui?</b><br>
+• <b>quantidade</b> → total vendido no período;<br>
+• <b>estoque_atual</b> → quanto já existe pronto na template_estoque;<br>
+• <b>faltante_produto</b> → quanto ainda precisa ser produzido;<br><br>
+<b>Somente os códigos com faltante_produto &gt; 0 serão explodidos em insumos.</b>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+            tabela_prod = df_merge_prod[["codigo", "nome", "quantidade", "estoque_atual", "faltante_produto"]]
+            st.dataframe(tabela_prod, use_container_width=True, height=350)
+
+            # Download da situação de produtos prontos
+            excel_produtos_prontos = gerar_excel_formatado(
+                tabela_prod, "produtos_prontos", agrupar_por_semi=False
+            )
+            st.download_button(
+                "📥 Baixar situação de produtos prontos (Excel)",
+                excel_produtos_prontos,
+                "situacao_produtos_prontos.xlsx",
+            )
+            st.caption("Esse arquivo mostra tudo o que foi vendido x o que já tem pronto x o que falta produzir.")
+
+            # ------------------------------------------------------------------
+            # 2.2 Filtra apenas faltantes para explodir em insumos
+            # ------------------------------------------------------------------
+            df_faltantes = df_merge_prod[df_merge_prod["faltante_produto"] > 0].copy()
+
+            if df_faltantes.empty:
+                st.markdown(
+                    """
+<div class="sucesso-box">
+✅ Todas as vendas foram cobertas com estoque de produtos prontos da template_estoque.<br>
+Não há necessidade de explodir insumos hoje.
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+                st.stop()
+
+            # Usa apenas a quantidade faltante
+            df_faltantes = df_faltantes[["codigo", "faltante_produto"]].rename(
+                columns={"faltante_produto": "quantidade"}
+            )
+
+            # Mescla com planilha mãe para ter semi/gola/bordado
+            df_mae_cols = df_mae.copy()
+            df_mae_cols.columns = df_mae_cols.columns.str.lower()
+            df_merged = df_faltantes.merge(df_mae_cols, on="codigo", how="left")
+
+            codigos_sem_mae = df_merged[df_merged["semi"].isna()]["codigo"].unique()
+            dados_validos_df = df_merged.dropna(subset=["semi"])
+
+            if len(codigos_sem_mae) > 0:
+                st.markdown(
+                    """
+<div class="alerta-box">
+⚠️ Existem códigos nas vendas que <b>não estão na Planilha Mãe</b>.<br>
+Esses códigos não serão explodidos em insumos até que sejam cadastrados.
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+                df_faltantes_mae = pd.DataFrame({"codigo": codigos_sem_mae})
+                excel_faltantes_mae = gerar_excel_formatado(
+                    df_faltantes_mae, "codigos_sem_mae", agrupar_por_semi=False
+                )
+                st.download_button(
+                    "📥 Baixar lista de códigos sem Planilha Mãe",
+                    excel_faltantes_mae,
+                    "codigos_sem_planilha_mae.xlsx",
+                )
+                st.caption("Use este arquivo para completar a Planilha Mãe com semi / gola / bordado.")
+
+            if dados_validos_df.empty:
+                st.error("Não há nenhum código faltante com semi configurado na Planilha Mãe.")
+                st.stop()
+
+            # ------------------------------------------------------------------
+            # 2.3 Explode insumos (apenas faltantes) → Semi / Gola / Bordado
+            # ------------------------------------------------------------------
+            st.subheader("🧵 Explosão em Insumos (apenas do que falta produzir)")
+
+            with st.spinner("Explodindo kits e gerando insumos..."):
+                dados_explodidos = explodir_kits(dados_validos_df, df_mae_cols)
+
+            if dados_explodidos.empty:
+                st.warning("Nenhum insumo foi encontrado para os códigos faltantes.")
+                st.stop()
+
+            st.markdown(
+                """
+<div class="explicacao-box">
+<b>O que é essa tabela?</b><br>
+Cada linha representa um insumo (Semi, Gola, Bordado) necessário para cobrir apenas o que <b>não</b> foi atendido com produto pronto.<br>
+A coluna <code>quantidade</code> já considera o total de peças faltantes.
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+            st.dataframe(dados_explodidos, use_container_width=True, height=300)
+
+            # ------------------------------------------------------------------
+            # 2.4 Cruzar insumos com estoque da template_estoque
+            # ------------------------------------------------------------------
+            st.subheader("🏭 Planejamento de Produção por Semi / Gola / Bordado")
+
+            st.markdown(
+                """
+<div class="explicacao-box">
+<b>Agora o app cruza os insumos necessários com o estoque da template_estoque:</b><br>
+1) Verifica se existe <b>Semi</b> em estoque;<br>
+2) Verifica se existem <b>Golas</b> em estoque;<br>
+3) Se faltar gola, calcula <b>Bordados</b> necessários para completar as golas faltantes.<br><br>
+Resultado:
+• Você vê exatamente <b>o que precisa produzir hoje</b>, organizado por Semi → Golas → Bordados.
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+            # Dicionários de estoque por nome (Semi / Gola / Bordado)
+            if not df_estoque.empty:
+                # Normaliza nomes
+                df_estoque["nome_norm"] = df_estoque["nome"].astype(str).str.strip().str.lower()
+                df_estoque["categoria_norm"] = df_estoque["categoria"].astype(str).str.strip().str.lower()
+
+                def build_dict(cat):
+                    sub = df_estoque[df_estoque["categoria_norm"] == cat].copy()
+                    return dict(zip(sub["nome_norm"], sub["estoque_atual"]))
+
+                estoque_semi_dict = build_dict("semi")
+                estoque_gola_dict = build_dict("gola")
+                estoque_bordado_dict = build_dict("bordado")
+            else:
+                estoque_semi_dict = {}
+                estoque_gola_dict = {}
+                estoque_bordado_dict = {}
+
+            # ---- Semis agregados ----
+            semi_agg = (
+                dados_explodidos.groupby("semi")["quantidade"].sum().reset_index()
+            )
+            semi_agg["semi_norm"] = semi_agg["semi"].astype(str).str.strip().str.lower()
+            semi_agg["estoque_atual"] = semi_agg["semi_norm"].map(estoque_semi_dict).fillna(0)
+            semi_agg["faltante_semi"] = (
+                semi_agg["quantidade"] - semi_agg["estoque_atual"]
+            ).clip(lower=0)
+
+            semi_agg[["categoria", "cor_ordem", "tamanho_ordem"]] = semi_agg["semi"].apply(
+                lambda x: pd.Series(get_categoria_ordem(x))
+            )
+            semi_agg_sorted = semi_agg.sort_values(
+                ["categoria", "cor_ordem", "tamanho_ordem", "semi"]
+            ).reset_index(drop=True)
+
+            # ---- Golas agregadas por Semi+Gola ----
+            dados_explodidos["gola"] = dados_explodidos["gola"].fillna("")
+            golas = dados_explodidos[dados_explodidos["gola"].str.strip() != ""].copy()
+
+            if not golas.empty:
+                gola_agg = (
+                    golas.groupby(["semi", "gola"])["quantidade"].sum().reset_index()
+                )
+                gola_agg["gola_norm"] = gola_agg["gola"].astype(str).str.strip().str.lower()
+                gola_agg["estoque_atual"] = gola_agg["gola_norm"].map(estoque_gola_dict).fillna(0)
+                gola_agg["faltante_gola"] = (
+                    gola_agg["quantidade"] - gola_agg["estoque_atual"]
+                ).clip(lower=0)
+            else:
+                gola_agg = pd.DataFrame(columns=["semi", "gola", "quantidade", "estoque_atual", "faltante_gola"])
+
+            # ---- Bordados (apenas quando faltar gola) ----
+            dados_explodidos["bordado"] = dados_explodidos["bordado"].fillna("")
+            bordados_list = []
+
+            if not gola_agg.empty:
+                # Para cada combinação semi+gola com falta, usa o bordado correspondente
+                falta_gola_df = gola_agg[gola_agg["faltante_gola"] > 0]
+                if not falta_gola_df.empty:
+                    # Mapeia (semi,gola) -> bordado mais comum
+                    mapa_bordado = (
+                        dados_explodidos.groupby(["semi", "gola"])["bordado"]
+                        .agg(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else "")
+                        .reset_index()
+                    )
+                    falta_gola_df = falta_gola_df.merge(
+                        mapa_bordado, on=["semi", "gola"], how="left"
+                    )
+
+                    for _, row in falta_gola_df.iterrows():
+                        qtd_bordados = row["faltante_gola"]
+                        if qtd_bordados <= 0:
+                            continue
+                        bordado_nome = str(row["bordado"]).strip()
+                        if bordado_nome == "":
+                            continue
+
+                        bordados_list.append(
+                            {
+                                "bordado": bordado_nome,
+                                "quantidade_necessaria": qtd_bordados,
+                            }
                         )
 
-                        df_merge_prod['estoque_atual'] = df_merge_prod['estoque_atual'].fillna(0)
-                        df_merge_prod['faltante_produto'] = (df_merge_prod['quantidade'] - df_merge_prod['estoque_atual']).clip(lower=0)
+            if bordados_list:
+                bordados_df = pd.DataFrame(bordados_list)
+                bordados_agg = (
+                    bordados_df.groupby("bordado")["quantidade_necessaria"]
+                    .sum()
+                    .reset_index()
+                )
+                bordados_agg = bordados_agg.rename(
+                    columns={"quantidade_necessaria": "quantidade"}
+                )
+                bordados_agg["bordado_norm"] = (
+                    bordados_agg["bordado"].astype(str).str.strip().str.lower()
+                )
+                bordados_agg["estoque_atual"] = bordados_agg["bordado_norm"].map(
+                    estoque_bordado_dict
+                ).fillna(0)
+                bordados_agg["faltante_bordado"] = (
+                    bordados_agg["quantidade"] - bordados_agg["estoque_atual"]
+                ).clip(lower=0)
+            else:
+                bordados_agg = pd.DataFrame(
+                    columns=["bordado", "quantidade", "estoque_atual", "faltante_bordado"]
+                )
 
-                        st.subheader("📦 Situação dos Produtos Prontos (template_estoque)")
-                        st.dataframe(
-                            df_merge_prod[['codigo', 'nome', 'quantidade', 'estoque_atual', 'faltante_produto']],
-                            use_container_width=True
-                        )
+            # ------------------------------------------------------------------
+            # 2.5 Relatório hierárquico na tela
+            # ------------------------------------------------------------------
+            st.markdown("### 📌 Visão por Semi → Golas → Bordados")
 
-                        df_para_produzir = df_merge_prod[df_merge_prod['faltante_produto'] > 0].copy()
-                        df_para_produzir = df_para_produzir[['codigo', 'faltante_produto']].rename(columns={'faltante_produto': 'quantidade'})
+            st.markdown(
+                """
+<div class="explicacao-box">
+<b>Como ler essa seção?</b><br>
+• Cada bloco começa com um <b>Semi</b> e a quantidade total necessária;<br>
+• Abaixo, aparecem as <b>Golas</b> associadas àquele semi e o quanto falta;<br>
+• Se faltar gola, o sistema calcula automaticamente os <b>Bordados</b> necessários.
+</div>
+""",
+                unsafe_allow_html=True,
+            )
 
-                        if df_para_produzir.empty:
-                            st.success("✅ Todos os produtos vendidos têm estoque suficiente na `template_estoque`. Nada a produzir hoje.")
-                            df_merge_mae = pd.merge(df_vendas[['codigo', 'quantidade']], df_mae, on='codigo', how='left')
-                            codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
-                            dados_validos_df = df_merge_mae.dropna(subset=['semi'])
-                        else:
-                            st.info(f"⚙️ {len(df_para_produzir)} código(s) com falta de produto pronto. Apenas esses serão explodidos em insumos.")
-                            df_merge_mae = pd.merge(df_para_produzir, df_mae, on='codigo', how='left')
-                            codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
-                            dados_validos_df = df_merge_mae.dropna(subset=['semi'])
-                    else:
-                        st.warning("⚠️ Não encontrei colunas 'codigo'/'código' + 'estoque_atual' em template_estoque. "
-                                   "Voltando para modo simples (explode todas as vendas).")
-                        df_merge_mae = pd.merge(df_vendas[['codigo', 'quantidade']], df_mae, on='codigo', how='left')
-                        codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
-                        dados_validos_df = df_merge_mae.dropna(subset=['semi'])
+            for _, semi_row in semi_agg_sorted.iterrows():
+                semi_nome = semi_row["semi"]
+                qtd_semi = int(semi_row["quantidade"])
+                est_semi = int(semi_row["estoque_atual"])
+                falt_semi = int(semi_row["faltante_semi"])
+
+                st.markdown(f"#### 🧵 Semi: **{semi_nome}**")
+                st.write(
+                    f"• Necessário: **{qtd_semi}** | Em estoque (Semi): **{est_semi}** | Faltando Semi: **{falt_semi}**"
+                )
+
+                # Golas deste semi
+                sub_gola = gola_agg[gola_agg["semi"] == semi_nome]
+                if not sub_gola.empty:
+                    st.write("**Golas para este Semi:**")
+                    gola_show = sub_gola[["gola", "quantidade", "estoque_atual", "faltante_gola"]].copy()
+                    gola_show.columns = [
+                        "Gola",
+                        "Qtd Necessária",
+                        "Estoque Atual (Gola)",
+                        "Faltante Gola",
+                    ]
+                    st.dataframe(gola_show, use_container_width=True, height=180)
                 else:
-                    # Sem estoque online → comportamento antigo (explode tudo que vendeu)
-                    df_merge_mae = pd.merge(df_vendas[['codigo', 'quantidade']], df_mae, on='codigo', how='left')
-                    codigos_faltantes = df_merge_mae[df_merge_mae['semi'].isna()]['codigo'].unique()
-                    dados_validos_df = df_merge_mae.dropna(subset=['semi'])
+                    st.write("_Nenhuma gola específica cadastrada para este Semi na Planilha Mãe._")
+
+                st.markdown("---")
 
             # ------------------------------------------------------------------
-            # 2) TRATAMENTO DE CÓDIGOS QUE NÃO ESTÃO NA PLANILHA MÃE
+            # 2.6 Download dos relatórios finais
             # ------------------------------------------------------------------
-            if len(codigos_faltantes) > 0:
-                st.warning(f"⚠️ {len(codigos_faltantes)} códigos não encontrados na Planilha Mãe!")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    df_faltantes = pd.DataFrame({'codigo': codigos_faltantes})
-                    df_faltantes['semi'] = ''
-                    df_faltantes['gola'] = ''
-                    df_faltantes['bordado'] = ''
-                    df_faltantes['componentes_codigos'] = ''
-                    excel_faltantes = gerar_excel_formatado(df_faltantes, "codigos_faltantes")
+            st.subheader("📥 3. Relatórios para Download")
+
+            col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+
+            # a) Relatório Componentes (hierárquico Semi > gola/bordado)
+            with col_r1:
+                excel_componentes = gerar_excel_formatado(
+                    dados_explodidos, "Componentes_por_Semi", agrupar_por_semi=True
+                )
+                st.download_button(
+                    "📋 Componentes por Semi (Excel)",
+                    excel_componentes,
+                    "componentes_por_semi.xlsx",
+                    key="btn_comp_semi",
+                )
+                st.caption(
+                    "Semi na linha principal e, logo abaixo, as golas/bordados com as quantidades necessárias."
+                )
+
+            # b) Resumo de Semis
+            with col_r2:
+                semi_res = semi_agg_sorted[["semi", "quantidade", "estoque_atual", "faltante_semi"]].copy()
+                semi_res.columns = [
+                    "Semi",
+                    "Qtd Necessária",
+                    "Estoque Atual (Semi)",
+                    "Faltante Semi",
+                ]
+                excel_semis = gerar_excel_formatado(
+                    semi_res, "Resumo_Semis", agrupar_por_semi=False
+                )
+                st.download_button(
+                    "🧵 Resumo de Semis (Excel)",
+                    excel_semis,
+                    "resumo_semis_producao.xlsx",
+                    key="btn_semis",
+                )
+                st.caption("Lista todos os semis, o quanto precisa, o que já tem e o que falta produzir.")
+
+            # c) Resumo de Golas
+            with col_r3:
+                if not gola_agg.empty:
+                    gola_res = gola_agg[["gola", "quantidade", "estoque_atual", "faltante_gola"]].copy()
+                    gola_res.columns = [
+                        "Gola",
+                        "Qtd Necessária",
+                        "Estoque Atual (Gola)",
+                        "Faltante Gola",
+                    ]
+                    excel_golas = gerar_excel_formatado(
+                        gola_res, "Resumo_Golas", agrupar_por_semi=False
+                    )
                     st.download_button(
-                        label="📥 Baixar Códigos Faltantes",
-                        data=excel_faltantes,
-                        file_name="codigos_faltantes.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        "👔 Resumo de Golas (Excel)",
+                        excel_golas,
+                        "resumo_golas_producao.xlsx",
+                        key="btn_golas",
                     )
-                
-                with col2:
-                    uploaded_faltantes = st.file_uploader(
-                        "📤 Enviar Códigos Completados", type=["xlsx"], key="codigos_completados",
-                        help="Preencha e envie a planilha de códigos faltantes."
-                    )
-                    if uploaded_faltantes:
-                        try:
-                            df_novos = load_excel(uploaded_faltantes)
-                            df_novos.columns = df_novos.columns.str.strip().str.replace(" ", "_").str.lower()
-                            
-                            if 'codigo' in df_novos.columns:
-                                df_mae_atualizada = pd.concat([df_mae, df_novos], ignore_index=True)
-                                df_mae_atualizada = df_mae_atualizada.drop_duplicates(subset=['codigo'], keep='last')
-                                
-                                st.session_state['df_mae'] = df_mae_atualizada
-                                st.success(f"✅ {len(df_novos)} produtos adicionados/atualizados na Planilha Mãe da sessão!")
-                                st.info("🔄 A página será recarregada para aplicar as mudanças. Por favor, reenvie o arquivo de vendas.")
-                                
-                                excel_mae_atualizada = gerar_excel_formatado(df_mae_atualizada, "planilha_mae_atualizada")
-                                st.download_button(
-                                    label="📥 Baixar Planilha Mãe Atualizada",
-                                    data=excel_mae_atualizada,
-                                    file_name="planilha_mae_atualizada.xlsx"
-                                )
-                                st.rerun()
-                            else:
-                                st.error("❌ Planilha de códigos completados deve ter a coluna 'codigo'.")
-                        except Exception as e:
-                            st.error(f"Erro ao processar códigos completados: {str(e)}")
-
-            # ------------------------------------------------------------------
-            # 3) EXPLOSÃO DOS PRODUTOS EM INSUMOS (APENAS FALTANTES)
-            # ------------------------------------------------------------------
-            if not dados_validos_df.empty:
-                with st.spinner("Explodindo produtos faltantes em Semi / Gola / Bordado..."):
-                    dados_explodidos = explodir_kits(dados_validos_df, st.session_state['df_mae'])
-
-                st.success(f"✅ Explosão concluída! {len(dados_explodidos)} componentes individuais (Semi/Gola/Bordado) encontrados.")
-
-                # ------------------------------------------------------------------
-                # 📈 Resumo do Dia (insumos)
-                # ------------------------------------------------------------------
-                st.header("📈 Resumo do Dia (Componentes para Produzir)")
-
-                col1, col2, col3 = st.columns(3)
-                resumos = {
-                    "👔 Manga Longa": dados_explodidos[dados_explodidos['semi'].str.contains('Manga Longa', na=False)],
-                    "👗 Manga Curta": dados_explodidos[dados_explodidos['semi'].str.contains('Manga Curta', na=False)],
-                    "👶 Mijões": dados_explodidos[dados_explodidos['semi'].str.contains('Mijão|Mijao', na=False, regex=True)]
-                }
-                
-                for i, (titulo, df_resumo) in enumerate(resumos.items()):
-                    with [col1, col2, col3][i]:
-                        st.subheader(titulo)
-                        total = df_resumo['quantidade'].sum()
-                        if total > 0:
-                            st.metric(f"Total {titulo.split(' ')[1]}", int(total))
-                        else:
-                            st.info(f"Nenhuma necessidade de {titulo.split(' ')[1]} hoje (pela explosão).")
-
-                # ------------------------------------------------------------------
-                # 📊 Relatórios “clássicos” (mantidos)
-                # ------------------------------------------------------------------
-                st.subheader("📊 Relatórios de Componentes (mantidos)")
-
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    excel_componentes = gerar_excel_formatado(
-                        dados_explodidos[['semi', 'gola', 'bordado', 'quantidade']].copy(),
-                        "relatorio_componentes",
-                        agrupar_por_semi=True
-                    )
-                    st.download_button("📋 Componentes (Semi + Golas/Bordados)",
-                                       excel_componentes,
-                                       "relatorio_componentes.xlsx")
-
-                with col2:
-                    resumo_semis = dados_explodidos.groupby('semi', as_index=False)['quantidade'].sum()
-                    resumo_semis[['cat', 'cor', 'tam']] = resumo_semis['semi'].apply(
-                        lambda x: pd.Series(get_categoria_ordem(x))
-                    )
-                    resumo_semis = resumo_semis.sort_values(['cat', 'cor', 'tam', 'semi']).drop(columns=['cat', 'cor', 'tam'])
-                    resumo_semis = resumo_semis.rename(columns={'semi': 'Semi', 'quantidade': 'Quantidade'})
-                    excel_semis = gerar_excel_formatado(resumo_semis, "resumo_semis")
-                    st.download_button("📊 Resumo Semis", excel_semis, "resumo_semis.xlsx")
-                
-                with col3:
-                    relatorio_golas = dados_explodidos.groupby('gola')['quantidade'].sum().reset_index()
-                    relatorio_golas = relatorio_golas[relatorio_golas['gola'].astype(str).str.strip() != '']
-                    relatorio_golas = relatorio_golas.sort_values('quantidade', ascending=False)
-                    excel_golas = gerar_excel_formatado(relatorio_golas, "relatorio_golas")
-                    st.download_button("👔 Relatório Golas", excel_golas, "relatorio_golas.xlsx")
-                
-                with col4:
-                    relatorio_bordados = dados_explodidos.groupby('bordado')['quantidade'].sum().reset_index()
-                    relatorio_bordados = relatorio_bordados[relatorio_bordados['bordado'].astype(str).str.strip() != '']
-                    relatorio_bordados = relatorio_bordados.sort_values('quantidade', ascending=False)
-                    excel_bordados = gerar_excel_formatado(relatorio_bordados, "relatorio_bordados")
-                    st.download_button("🎨 Relatório Bordados", excel_bordados, "relatorio_bordados.xlsx")
-
-                # ------------------------------------------------------------------
-                # 💣 NOVO: PRODUZIR HOJE (com base no estoque de insumos)
-                # ------------------------------------------------------------------
-                st.header("🧱 Produção Necessária Hoje (cruzando com estoque de insumos)")
-
-                if df_estoque_raw is None:
-                    st.warning("⚠️ Estoque `template_estoque` não carregado. Não é possível calcular falta de Semi/Gola/Bordado.")
+                    st.caption("Quais golas você precisa hoje, quanto tem e quanto falta fazer.")
                 else:
-                    semis_falta, golas_falta, bords_falta = cruzar_com_estoque_insumos(dados_explodidos, df_estoque_raw)
+                    st.info("Não há golas mapeadas para esse conjunto de vendas.")
 
-                    # --- SEMIS FALTANTES ---
-                    st.subheader("1️⃣ Produzir Hoje – SEMIS")
-                    if semis_falta is None or semis_falta.empty:
-                        st.success("Nenhum Semi faltando (considerando estoque atual).")
-                    else:
-                        st.dataframe(semis_falta, use_container_width=True)
-                        excel_semis_falta = gerar_excel_formatado(semis_falta, "produzir_semis_hoje")
-                        st.download_button(
-                            "📥 Baixar 'Produzir Hoje – Semis'",
-                            excel_semis_falta,
-                            "produzir_semis_hoje.xlsx"
-                        )
-
-                    # --- GOLAS FALTANTES ---
-                    st.subheader("2️⃣ Produzir Hoje – GOLAS")
-                    if golas_falta is None or golas_falta.empty:
-                        st.success("Nenhuma Gola faltando (considerando estoque atual).")
-                    else:
-                        st.dataframe(golas_falta, use_container_width=True)
-                        excel_golas_falta = gerar_excel_formatado(golas_falta, "produzir_golas_hoje")
-                        st.download_button(
-                            "📥 Baixar 'Produzir Hoje – Golas'",
-                            excel_golas_falta,
-                            "produzir_golas_hoje.xlsx"
-                        )
-
-                    # --- BORDAR HOJE (BORDADOS) ---
-                    st.subheader("3️⃣ Bordar Hoje – BORDADOS (quando não há gola pronta)")
-                    if bords_falta is None or bords_falta.empty:
-                        st.success("Nenhum Bordado faltando (considerando estoque atual).")
-                    else:
-                        st.dataframe(bords_falta, use_container_width=True)
-                        excel_bords_falta = gerar_excel_formatado(bords_falta, "bordar_hoje_bordados")
-                        st.download_button(
-                            "📥 Baixar 'Bordar Hoje – Bordados'",
-                            excel_bords_falta,
-                            "bordar_hoje_bordados.xlsx"
-                        )
+            # d) Resumo de Bordados
+            with col_r4:
+                if not bordados_agg.empty:
+                    bord_res = bordados_agg[
+                        ["bordado", "quantidade", "estoque_atual", "faltante_bordado"]
+                    ].copy()
+                    bord_res.columns = [
+                        "Bordado",
+                        "Qtd Necessária",
+                        "Estoque Atual (Bordado)",
+                        "Faltante Bordado",
+                    ]
+                    excel_bordados = gerar_excel_formatado(
+                        bord_res, "Resumo_Bordados", agrupar_por_semi=False
+                    )
+                    st.download_button(
+                        "🎨 Resumo de Bordados (Excel)",
+                        excel_bordados,
+                        "resumo_bordados_producao.xlsx",
+                        key="btn_bordados",
+                    )
+                    st.caption(
+                        "Somente bordados necessários para cobrir as golas que estão faltando."
+                    )
+                else:
+                    st.info("Nenhum bordado adicional foi necessário para esta produção.")
 
         except Exception as e:
             st.error(f"Ocorreu um erro inesperado durante o processamento: {str(e)}")
 
-# --- Barra Lateral ---
+
+# ==============================================================================
+# SIDEBAR - AJUDA RÁPIDA
+# ==============================================================================
+
 st.sidebar.markdown("---")
 st.sidebar.info(
-    "💡 **Planilha Mãe:**\n"
-    "Fica carregada durante toda esta sessão. "
-    "Se fechar o navegador, precisa carregar de novo."
+    "💡 A Planilha Mãe permanece carregada apenas nesta sessão. "
+    "Se fechar o navegador, será preciso carregá-la novamente."
 )
 st.sidebar.markdown("---")
 st.sidebar.info(
-    "📦 **Estoque (`template_estoque`):**\n"
-    "Usado apenas para LEITURA.\n\n"
-    "1️⃣ Primeiro verifica se existe produto pronto.\n"
-    "2️⃣ Explode apenas o que está faltando.\n"
-    "3️⃣ Depois cruza Semi / Gola / Bordado com o estoque para montar:\n"
-    "   • Produzir Hoje – Semis\n"
-    "   • Produzir Hoje – Golas\n"
-    "   • Bordar Hoje – Bordados"
+    "📦 A template_estoque é acessada em modo SOMENTE LEITURA.\n\n"
+    "• O app de relatórios <b>nunca</b> altera a planilha de estoque.\n"
+    "• Quem altera estoque é apenas o cockpit <code>estoque-completo-v3</code>."
 )

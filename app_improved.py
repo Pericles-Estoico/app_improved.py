@@ -80,13 +80,13 @@ def split_list(texto):
 
 def get_categoria_ordem(semi_nome):
     """
-    Define ordem dos semis pela descrição (mesma lógica antiga):
+    Define ordem dos semis pela descrição:
     1 = Manga Longa
     2 = Manga Curta Menina
     3 = Manga Curta Menino
     4 = Mijão
-    E dentro disso: Branco / Off / Rosa / Azul / Vermelho / Marinho / outros
-    E depois RN, P, M, G
+    Depois por cor (Branco, Off, Rosa, Azul, Vermelho, Marinho, outros)
+    Depois por tamanho (RN, P, M, G).
     """
     s = str(semi_nome).lower()
 
@@ -271,7 +271,7 @@ uploaded_template = st.file_uploader(
 
 if uploaded_template:
     try:
-        df_est = load_excel(uploaded_template)  # primeira aba já resolve para o uso
+        df_est = load_excel(uploaded_template)  # primeira aba
         df_est = normalizar_colunas(df_est)
 
         colunas_obrigatorias = ["codigo", "nome", "categoria", "estoque_atual"]
@@ -337,7 +337,7 @@ else:
             df_vendas = load_excel(uploaded_vendas)
             df_vendas = normalizar_colunas(df_vendas)
 
-            # Descobrir nomes das colunas de código e quantidade
+            # Descobrir colunas de código e quantidade
             col_codigo = None
             for c in ["codigo", "código", "cod"]:
                 if c in df_vendas.columns:
@@ -411,13 +411,10 @@ else:
                 semis_dict = {}       # semi_codigo -> {nome, qtd}
                 golas_dict = {}       # (semi_codigo, gola_codigo) -> {nomes, qtd}
                 bordados_dict = {}    # bordado_codigo -> {nome, qtd}
-
                 erros_codigos = []
 
                 def processar_codigo(codigo, multiplicador):
                     """Recursivamente: kit → componentes → produto simples → insumos."""
-                    nonlocal semis_dict, golas_dict, bordados_dict, erros_codigos
-
                     if codigo not in df_est_index.index:
                         erros_codigos.append(codigo)
                         return

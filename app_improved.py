@@ -1,6 +1,6 @@
 # app_improved.py
 # Sistema de Relatórios & Planejamento de Produção
-# Versão unificada usando apenas template_estoque (somente leitura)
+# Versão unificada usando apenas template_estoque (Google Sheets - SOMENTE LEITURA)
 
 import streamlit as st
 import pandas as pd
@@ -10,8 +10,13 @@ from openpyxl.styles import PatternFill, Font, Border, Side
 import numpy as np
 
 # ==============================================================================
-# CONFIG GERAL DA PÁGINA
+# CONFIGURAÇÕES GERAIS
 # ==============================================================================
+
+# 🔗 CONFIG DO GOOGLE SHEETS (APENAS LEITURA)
+# Se precisar mudar, só troque o ID ou o nome da aba.
+GOOGLE_SHEET_ID = "1PpiMQingHf4llA03BiPIuPJPIZqul4grRU_emWDEK1o"
+TEMPLATE_SHEET_NAME = "template_estoque"  # nome da aba onde está o estoque
 
 st.set_page_config(
     page_title="Pure & Posh Baby - Vendas → Estoque → Produção",
@@ -35,7 +40,7 @@ st.markdown("**Pure & Posh Baby — Vendas → Estoque → Produção**")
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==============================================================================
-# ESTADO INICIAL
+# ESTADO
 # ==============================================================================
 
 if "df_estoque" not in st.session_state:
@@ -49,8 +54,23 @@ if "template_carregado" not in st.session_state:
 # ==============================================================================
 
 @st.cache_data
+def load_template_from_google(sheet_id: str, sheet_name: str):
+    """
+    Lê o template_estoque direto do Google Sheets em modo SOMENTE LEITURA.
+
+    Importante:
+    - A planilha precisa permitir leitura pública OU
+      estar compartilhada de forma que o servidor do Streamlit consiga ler.
+    - Este método apenas faz um GET no link de exportação, não tem permissão de escrita.
+    """
+    # URL padrão de exportação em XLSX
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+    df = pd.read_excel(url, sheet_name=sheet_name)
+    return df
+
+@st.cache_data
 def load_excel(file, sheet_name=None):
-    """Carrega um Excel em DataFrame, com cache."""
+    """Carrega um Excel em DataFrame, com cache (usado para vendas)."""
     return pd.read_excel(file, sheet_name=sheet_name)
 
 def normalizar_colunas(df):
@@ -232,17 +252,21 @@ def gerar_excel_simples(df, sheet_name="Relatorio"):
     return output
 
 # ==============================================================================
-# 1. CARREGAR TEMPLATE_ESTOQUE (MODELO ÚNICO)
+# 1. CARREGAR TEMPLATE_ESTOQUE DO GOOGLE (SOMENTE LEITURA)
 # ==============================================================================
 
-st.header("1. Configuração Inicial — template_estoque (modelo único)")
+st.header("1. Configuração Inicial — template_estoque (Google Sheets - somente leitura)")
 
-with st.expander("📘 O que é o template_estoque? (clique para ver explicação)", expanded=True):
+with st.expander("📘 Como funciona o template_estoque", expanded=True):
     st.markdown(
         """
-        **É a planilha ÚNICA de estoque** usada por toda a operação.
+        **É a planilha ÚNICA de estoque usada por toda a operação.**
 
-        Colunas principais esperadas (na aba `template_estoque` ou na primeira aba):
+        Este app **não faz upload**, não grava, não altera células.
+        Ele apenas lê o conteúdo da aba configurada em `TEMPLATE_SHEET_NAME`
+        dentro da planilha cujo ID está em `GOOGLE_SHEET_ID`.
+
+        Colunas principais esperadas:
 
         - `codigo` → código do item (produto pronto, semi, gola, bordado, kit, etc.)
         - `nome` → descrição legível
@@ -252,26 +276,27 @@ with st.expander("📘 O que é o template_estoque? (clique para ver explicaçã
         - `componentes` → (opcional) lista de códigos dos componentes do kit, separados por vírgula
         - `quantidades` → (opcional) lista de quantidades correspondentes aos componentes (mesma ordem)
 
-        Para **produção**, você pode (recomendado) ter mais 3 colunas:
+        Para **produção**, é recomendado ter:
 
         - `semi_codigo` → código do semi usado em cada produto pronto
         - `gola_codigo` → código da gola pronta usada em cada produto
         - `bordado_codigo` → código do bordado (quando a gola depender de bordado)
 
         🔒 **Importante**: este app só **LÊ** o template_estoque.  
-        Nenhuma célula é alterada — quem continua mandando é o seu outro app de estoque.
+        Quem continua comandando o estoque é o seu outro app.
         """
     )
 
-uploaded_template = st.file_uploader(
-    "📂 Envie um Excel exportado do `template_estoque` (formato .xlsx)",
-    type=["xlsx"],
-    key="template_estoque_file",
-)
+col_a, col_b = st.columns([1, 3])
+with col_a:
+    if st.button("🔄 Recarregar do Google Sheets"):
+        load_template_from_google.clear()
+        st.session_state["template_carregado"] = False
+        st.rerun()
 
-if uploaded_template:
+if not st.session_state["template_carregado"]:
     try:
-        df_est = load_excel(uploaded_template)  # primeira aba
+        df_est = load_template_from_google(GOOGLE_SHEET_ID, TEMPLATE_SHEET_NAME)
         df_est = normalizar_colunas(df_est)
 
         colunas_obrigatorias = ["codigo", "nome", "categoria", "estoque_atual"]
@@ -279,12 +304,14 @@ if uploaded_template:
 
         if faltando:
             st.error(
-                f"❌ O template_estoque precisa ter as colunas: {', '.join(colunas_obrigatorias)}. "
+                "❌ O template_estoque (aba "
+                f"`{TEMPLATE_SHEET_NAME}`) precisa ter as colunas: {', '.join(colunas_obrigatorias)}. "
                 f"Faltando: {', '.join(faltando)}"
             )
         else:
             # Garante colunas opcionais
-            for col in ["eh_kit", "componentes", "quantidades", "semi_codigo", "gola_codigo", "bordado_codigo"]:
+            for col in ["eh_kit", "componentes", "quantidades",
+                        "semi_codigo", "gola_codigo", "bordado_codigo"]:
                 if col not in df_est.columns:
                     df_est[col] = ""
 
@@ -293,23 +320,23 @@ if uploaded_template:
 
             total_itens = len(df_est)
             total_kits = df_est["eh_kit"].apply(bool_from_any).sum()
-            total_com_mapa_producao = df_est["semi_codigo"].astype(str).str.strip().ne("").sum()
+            total_mapeados = df_est["semi_codigo"].astype(str).str.strip().ne("").sum()
 
             st.success(
-                f"✅ template_estoque carregado com **{total_itens} itens**, "
-                f"**{total_kits} kits** e **{total_com_mapa_producao} produtos** já mapeados com semi/gola/bordado."
+                f"✅ template_estoque lido do Google Sheets com **{total_itens} itens**, "
+                f"**{total_kits} kits** e **{total_mapeados} produtos** mapeados em semi/gola/bordado."
             )
 
             st.dataframe(df_est.head(20))
     except Exception as e:
-        st.error(f"Erro ao carregar template_estoque: {e}")
+        st.error(f"Erro ao ler template_estoque do Google Sheets: {e}")
 
 # ==============================================================================
 # 2. PROCESSAR VENDAS DO DIA
 # ==============================================================================
 
 if not st.session_state["template_carregado"]:
-    st.info("➡ Antes, carregue o `template_estoque`.")
+    st.info("➡ Antes, garanta que o template_estoque foi carregado com sucesso.")
 else:
     st.header("2. Processar Vendas do Dia")
 
@@ -385,10 +412,12 @@ else:
                 if df_produtos_faltantes.empty:
                     st.success("✅ Não há falta de produto pronto para os códigos desta venda.")
                 else:
-                    st.dataframe(df_produtos_faltantes[["codigo", "nome", "quantidade", "estoque_atual", "falta_produto"]])
+                    st.dataframe(df_produtos_faltantes[["codigo", "nome", "quantidade",
+                                                        "estoque_atual", "falta_produto"]])
 
                     excel_produtos = gerar_excel_simples(
-                        df_produtos_faltantes[["codigo", "nome", "quantidade", "estoque_atual", "falta_produto"]],
+                        df_produtos_faltantes[["codigo", "nome", "quantidade",
+                                               "estoque_atual", "falta_produto"]],
                         sheet_name="Produtos_Prontos"
                     )
                     st.download_button(
@@ -495,7 +524,7 @@ else:
                     )
 
                 # --------------------------------------------------------------
-                # 2.3. MONTAR RELATÓRIO SEMI + GOLAS CASADOS (POR ORDEM)
+                # 2.3. RELATÓRIO SEMI + GOLAS CASADOS
                 # --------------------------------------------------------------
 
                 if not semis_dict:
@@ -559,7 +588,8 @@ else:
                     # Mostrar tabela no app
                     st.subheader("🧵 Produzir Hoje — SEMIS casados com suas GOLAS")
                     df_relatorio_semis_golas = pd.DataFrame(relatorio_linhas)
-                    st.dataframe(df_relatorio_semis_golas[["item", "qtd_necessaria", "estoque_atual", "falta"]])
+                    st.dataframe(df_relatorio_semis_golas[["item", "qtd_necessaria",
+                                                           "estoque_atual", "falta"]])
 
                     # Download Excel hierárquico
                     excel_semis_golas = gerar_excel_semis_golas(relatorio_linhas)
@@ -583,7 +613,8 @@ else:
                     df_bord["falta"] = (df_bord["qtd_necessaria"] - df_bord["estoque_atual"]).clip(lower=0)
 
                     df_bord_view = df_bord[
-                        ["bordado_codigo", "bordado_nome", "qtd_necessaria", "estoque_atual", "falta"]
+                        ["bordado_codigo", "bordado_nome", "qtd_necessaria",
+                         "estoque_atual", "falta"]
                     ].sort_values("bordado_nome")
 
                     st.dataframe(df_bord_view)
@@ -597,33 +628,35 @@ else:
                     )
 
                 # --------------------------------------------------------------
-                # 2.5. EXPLICAÇÃO FINAL DA TELA
+                # 2.5. EXPLICAÇÃO FINAL
                 # --------------------------------------------------------------
                 st.markdown("---")
                 st.markdown(
                     """
-                    ### 🧭 O que cada bloco da tela significa
+                    ### 🧭 Resumo do fluxo
 
-                    1. **Situação de Produtos Prontos**  
-                       - Mostra, código a código, quanto foi vendido, quanto há em estoque e quanto falta.  
-                       - Apenas os códigos com `falta_produto > 0` são usados na explosão.
+                    1. **Leitura do template_estoque**  
+                       - Direto do Google Sheets, aba configurada.  
+                       - Somente leitura, nenhuma célula é alterada.
 
-                    2. **Explosão em Insumos**  
-                       - Para cada produto com falta:
-                         - Se for **kit (`eh_kit = Sim`)**, ele entra nos componentes e soma tudo.
-                         - Se for produto simples, usa `semi_codigo`, `gola_codigo` e `bordado_codigo`.
+                    2. **Leitura da planilha de vendas**  
+                       - Você sobe um XLSX diário (Mercado Livre, Shopee, etc.).  
+                       - O app soma por código.
 
-                    3. **Produzir Hoje — Semis & Golas**  
-                       - Mostra **cada Semi em uma linha** (com falta já descontando estoque).  
-                       - Logo abaixo, **as Golas casadas com aquele Semi**, com as respectivas faltas.  
-                       - É o relatório ideal para você mandar para a célula de **Semi + Golas**.
+                    3. **Produtos Prontos Faltantes**  
+                       - Compara vendas x estoque_atual.  
+                       - Só explode em insumos o que realmente está faltando.
 
-                    4. **Produzir Hoje — Bordados**  
-                       - Soma os bordados usados pelos produtos faltantes (onde `bordado_codigo` foi definido).  
-                       - Útil para a célula de bordados / rebater golas.
+                    4. **Explosão em Semi / Gola / Bordado**  
+                       - Respeita kits (`eh_kit`, `componentes`, `quantidades`).  
+                       - Usa `semi_codigo`, `gola_codigo`, `bordado_codigo`
+                         para montar o plano de produção.
 
-                    Todos os relatórios são **somente leitura em relação ao template_estoque**.  
-                    Nada do seu controle principal de estoque é alterado por este app.
+                    5. **Relatórios de Produção**  
+                       - `Produzir Hoje — Semis & Golas` → ideal para célula de costura.  
+                       - `Produzir Hoje — Bordados` → ideal para célula de bordado/rebater golas.
+
+                    Tudo isso mantendo o **template_estoque intocável**.
                     """
                 )
 
